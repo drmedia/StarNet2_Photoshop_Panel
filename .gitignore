@@ -1,0 +1,29 @@
+# Generated test and temporary files
+tests/Photoshop_Integration_Result.txt
+.quality-test/
+*.log
+*.tmp
+*.tif
+*.tiff
+*.jpg
+*.jpeg
+*.png
+
+# StarNet2/runtime binaries and models
+*.exe
+*.dll
+*.onnx
+*.weights
+
+# Installer staging and release archives
+*.installing/
+*.backup/
+*.zip
+
+# Editor, operating-system, and dependency files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+node_modules/
