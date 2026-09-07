@@ -27,3 +27,6 @@ tests/Photoshop_Integration_Result.txt
 Thumbs.db
 Desktop.ini
 node_modules/
+
+# Distribution artifacts
+dist/

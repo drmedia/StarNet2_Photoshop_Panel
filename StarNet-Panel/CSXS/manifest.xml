@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.starnet.photoshop.panel" ExtensionBundleVersion="0.9.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.starnet.photoshop.panel" ExtensionBundleVersion="0.9.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.starnet.photoshop.panel" Version="0.9.0" />
+    <Extension Id="com.starnet.photoshop.panel" Version="0.9.1" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList><Host Name="PHXS" Version="19.0" /></HostList>
