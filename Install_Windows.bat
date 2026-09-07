@@ -157,7 +157,7 @@ echo [OK] 설치 및 검증 완료:
 echo      %DST%
 echo.
 echo Photoshop을 다시 실행한 뒤 다음 메뉴를 확인하세요:
-echo Window ^> Extensions ^(Legacy^) ^> StarNet
+echo Window ^> Extensions ^(Legacy^) ^> StarNet2
 echo.
 pause
 exit /b 0

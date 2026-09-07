@@ -23,7 +23,7 @@
         <Lifecycle><AutoVisible>true</AutoVisible></Lifecycle>
         <UI>
           <Type>Panel</Type>
-          <Menu>StarNet</Menu>
+          <Menu>StarNet2</Menu>
           <Geometry><Size><Width>340</Width><Height>620</Height></Size><MinSize><Width>280</Width><Height>520</Height></MinSize></Geometry>
         </UI>
       </DispatchInfo>

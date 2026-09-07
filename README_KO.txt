@@ -1,4 +1,4 @@
-StarNet Photoshop Panel
+StarNet2 Photoshop Panel
 Windows / Photoshop CEP Panel
 ============================================================
 
@@ -34,7 +34,7 @@ tests\
 ----
 1. Photoshop을 종료합니다.
 2. Install_Windows.bat을 실행합니다.
-3. Photoshop 재시작 후 Window > Extensions (Legacy) > StarNet을 엽니다.
+3. Photoshop 재시작 후 Window > Extensions (Legacy) > StarNet2를 엽니다.
 
 현재 상태
 ----------
