@@ -98,7 +98,7 @@ if errorlevel 1 goto :copy_failed
 
 set "VERIFY_ROOT=%STAGE%"
 set "COPY_FAILED="
-for %%F in ("CSXS\manifest.xml" "client\index.html" "client\style.css" "client\main.js" "host\host.jsx") do (
+for %%F in ("CSXS\manifest.xml" "client\index.html" "client\style.css" "client\main.js" "client\stretch-processor.js" "client\stretch-editor-window.html" "client\stretch-editor-window.css" "client\stretch-editor-window.js" "host\host.jsx") do (
     call :verify_file "%%~F"
     if errorlevel 1 set "COPY_FAILED=1"
 )

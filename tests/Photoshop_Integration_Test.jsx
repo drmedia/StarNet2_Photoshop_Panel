@@ -47,6 +47,8 @@
                 assertTrue(decodeURIComponent(pixelInfo[1]) === 'ST 정보', 'encoded document name mismatch');
                 assertTrue(pixelInfo[5] === '1' && pixelInfo[6] === 'FULL', 'full-frame pixel layer was not reported ready');
                 assertTrue(pixelInfo[7] === '0' && pixelInfo[8] === '0', 'empty sky-region state was not reported');
+                assertTrue(Number(pixelInfo[9]) === document.id && Number(pixelInfo[10]) === document.activeLayer.id,
+                    'document or layer ID was not reported');
 
                 document.selection.select([[0, 0], [16, 0], [16, 32], [0, 32]]);
                 var selectionInfo = ST_getActiveDocumentInfo().split('|');
@@ -131,6 +133,76 @@
             } finally {
                 removeFile(compositeFile);
                 removeFile(layerFile);
+                document.close(SaveOptions.DONOTSAVECHANGES);
+            }
+        });
+
+        test('stretch preview closes its temporary document', function () {
+            var document = app.documents.add(48, 32, 72, 'ST_STRETCH_PREVIEW', NewDocumentMode.RGB, DocumentFill.WHITE);
+            var previewFile = new File(Folder.temp.fsName + '/starnet2_test_stretch_preview.jpg');
+            removeFile(previewFile);
+            try {
+                var documentCount = app.documents.length;
+                var preview = ST_prepareStretchPreview(previewFile.fsName, 24, 24).split('|');
+                assertTrue(preview[0] === 'OK', 'stretch preview failed: ' + preview.join('|'));
+                assertTrue(previewFile.exists, 'stretch preview JPEG was not created');
+                assertTrue(app.documents.length === documentCount, 'stretch preview temporary document remained open');
+                assertTrue(app.activeDocument === document, 'source document was not restored after stretch preview');
+                assertTrue(Number(preview[1]) === document.id && Number(preview[2]) === document.activeLayer.id,
+                    'stretch preview source metadata mismatch');
+            } finally {
+                removeFile(previewFile);
+                document.close(SaveOptions.DONOTSAVECHANGES);
+            }
+        });
+
+        test('stretch input remains locked to the preview document and layer', function () {
+            var document = app.documents.add(32, 32, 72, 'ST_STRETCH_TARGET', NewDocumentMode.RGB, DocumentFill.WHITE);
+            var stretchFile = new File(Folder.temp.fsName + '/starnet2_test_stretch_target.tif');
+            removeFile(stretchFile);
+            try {
+                var layerId = document.activeLayer.id;
+                var wrongDocument = ST_prepareInput(stretchFile.fsName, 'layer', document.id + 100000, layerId);
+                assertTrue(wrongDocument.indexOf('ERROR|') === 0, 'changed document was accepted');
+                assertTrue(!stretchFile.exists, 'changed-document input TIFF was created');
+                var wrongLayer = ST_prepareInput(stretchFile.fsName, 'layer', document.id, layerId + 100000);
+                assertTrue(wrongLayer.indexOf('ERROR|') === 0, 'changed layer was accepted');
+                assertTrue(!stretchFile.exists, 'changed-layer input TIFF was created');
+                var valid = ST_prepareInput(stretchFile.fsName, 'layer', document.id, layerId);
+                assertTrue(valid.indexOf('OK|') === 0 && stretchFile.exists, 'locked Stretch target was rejected');
+            } finally {
+                removeFile(stretchFile);
+                document.close(SaveOptions.DONOTSAVECHANGES);
+            }
+        });
+
+        test('stretch layer-sky uses active layer and applies the region mask', function () {
+            var document = app.documents.add(32, 32, 72, 'ST_STRETCH_REGION', NewDocumentMode.RGB, DocumentFill.WHITE);
+            var stretchFile = new File(Folder.temp.fsName + '/starnet2_test_stretch_region.tif');
+            removeFile(stretchFile);
+            try {
+                var sourceLayer = document.activeLayer;
+                document.selection.select([[0, 0], [16, 0], [16, 32], [0, 32]]);
+                var prepared = ST_prepareInput(stretchFile.fsName, 'layer-sky').split('|');
+                assertTrue(prepared[0] === 'OK', 'stretch layer-sky export failed: ' + prepared.join('|'));
+                assertTrue(Number(prepared[2]) === sourceLayer.id, 'stretch source layer anchor was not retained');
+                var maskToken = decodeURIComponent(prepared[6]);
+                assertTrue(maskToken.indexOf('S:') === 0, 'stretch selection token was not created');
+
+                var imported = ST_importResult(stretchFile.fsName, document.id, 'Stretched test', sourceLayer.id,
+                    prepared[4], decodeURIComponent(prepared[5]), maskToken, 100).split('|');
+                assertTrue(imported[0] === 'OK', 'stretch result import failed: ' + imported.join('|'));
+                var resultLayer = ST_findLayerById(document, Number(imported[1]));
+                assertTrue(resultLayer !== null, 'stretch result layer was not created');
+                assertTrue(resultLayer.parent === sourceLayer.parent, 'stretch result was not placed with the source layer');
+                assertTrue(ST_activeLayerHasMask(document), 'stretch result has no region mask');
+
+                var finalized = ST_finalizeSkyMask(document.id, maskToken);
+                assertTrue(finalized === 'OK', 'stretch region cleanup failed: ' + finalized);
+                assertTrue(ST_hasSelection(document), 'stretch source selection was not restored');
+                resultLayer.remove();
+            } finally {
+                removeFile(stretchFile);
                 document.close(SaveOptions.DONOTSAVECHANGES);
             }
         });

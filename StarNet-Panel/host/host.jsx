@@ -16,7 +16,8 @@ function ST_getActiveDocumentInfo() {
         (isPixelLayer ? "1" : "0") + "|" +
         coverage + "|" +
         (ST_hasSelection(document) ? "1" : "0") + "|" +
-        (ST_activeLayerHasMask(document) ? "1" : "0");
+        (ST_activeLayerHasMask(document) ? "1" : "0") + "|" +
+        document.id + "|" + layer.id;
 }
 
 function ST_isPixelLayer(layer) {
@@ -197,16 +198,28 @@ function ST_finalizeSkyMask(documentId, maskToken) {
     }
 }
 
-function ST_prepareInput(filePath, processingTarget) {
+function ST_prepareInput(filePath, processingTarget, expectedDocumentId, expectedLayerId) {
     if (!app.documents.length) return "ERROR|No Photoshop document is open";
     var source = app.activeDocument;
-    var mode = processingTarget === "layer" ? "layer" : (processingTarget === "sky" ? "sky" : "composite");
+    var mode = processingTarget === "layer" ? "layer" :
+        (processingTarget === "layer-sky" ? "layer-sky" :
+        (processingTarget === "sky" ? "sky" : "composite"));
+    var usesActiveLayer = mode === "layer" || mode === "layer-sky";
+    var usesSkyMask = mode === "sky" || mode === "layer-sky";
     var sourceLayer = source.activeLayer;
-    if (mode === "layer" && !ST_isPixelLayer(sourceLayer)) {
+    if (expectedDocumentId !== undefined && expectedDocumentId !== "" &&
+            source.id !== Number(expectedDocumentId)) {
+        return "ERROR|미리보기를 만든 문서가 현재 문서가 아닙니다. Stretch Editor를 다시 여세요.";
+    }
+    if (expectedLayerId !== undefined && expectedLayerId !== "" &&
+            sourceLayer.id !== Number(expectedLayerId)) {
+        return "ERROR|미리보기를 만든 레이어가 현재 레이어가 아닙니다. Stretch Editor를 다시 여세요.";
+    }
+    if (usesActiveLayer && !ST_isPixelLayer(sourceLayer)) {
         return "ERROR|현재 레이어만 처리하려면 일반 픽셀 레이어를 선택하세요.";
     }
-    var anchorLayerId = mode === "layer" ? sourceLayer.id : "";
-    var layerCoverage = mode === "layer" && !ST_layerCoversDocument(source, sourceLayer) ? "PARTIAL" : "FULL";
+    var anchorLayerId = usesActiveLayer ? sourceLayer.id : "";
+    var layerCoverage = usesActiveLayer && !ST_layerCoversDocument(source, sourceLayer) ? "PARTIAL" : "FULL";
     var working = null;
     var preparedProfileMode = "NONE";
     var preparedProfileName = "";
@@ -215,8 +228,8 @@ function ST_prepareInput(filePath, processingTarget) {
     var skyMaskToken = "";
     try {
         app.displayDialogs = DialogModes.NO;
-        if (mode === "sky") skyMaskToken = ST_captureSkyMask(source);
-        if (mode === "layer") {
+        if (usesSkyMask) skyMaskToken = ST_captureSkyMask(source);
+        if (usesActiveLayer) {
             originalBackgroundColor = app.backgroundColor;
             var black = new SolidColor();
             black.rgb.red = 0;
@@ -266,7 +279,7 @@ function ST_prepareInput(filePath, processingTarget) {
         preparedProfileMode = ST_profileMode(working);
         preparedProfileName = ST_profileName(working);
         var options = new TiffSaveOptions();
-        options.imageCompression = TIFFEncoding.TIFFLZW;
+        options.imageCompression = TIFFEncoding.NONE;
         options.layers = false;
         options.alphaChannels = false;
         options.embedColorProfile = preparedProfileMode === "TAGGED";
@@ -297,6 +310,62 @@ function ST_findDocumentById(documentId) {
         if (app.documents[index].id === documentId) return app.documents[index];
     }
     return null;
+}
+
+function ST_prepareStretchPreview(filePath, maxWidth, maxHeight) {
+    if (!app.documents.length) return "ERROR|No Photoshop document is open";
+    var source = app.activeDocument;
+    var sourceLayer = source.activeLayer;
+    if (!ST_isPixelLayer(sourceLayer)) return "ERROR|Stretch Preview에는 일반 픽셀 레이어가 필요합니다.";
+    var working = null;
+    var originalBackgroundColor = null;
+    var originalDialogs = app.displayDialogs;
+    try {
+        app.displayDialogs = DialogModes.NO;
+        originalBackgroundColor = app.backgroundColor;
+        var black = new SolidColor();
+        black.rgb.red = 0; black.rgb.green = 0; black.rgb.blue = 0;
+        app.backgroundColor = black;
+        var profileName = source.mode === DocumentMode.RGB ? ST_profileName(source) : "";
+        if (profileName) {
+            working = app.documents.add(source.width, source.height, source.resolution,
+                "Stretch Preview", NewDocumentMode.RGB, DocumentFill.BACKGROUNDCOLOR,
+                1.0, BitsPerChannelType.EIGHT, profileName);
+        } else {
+            working = app.documents.add(source.width, source.height, source.resolution,
+                "Stretch Preview", NewDocumentMode.RGB, DocumentFill.BACKGROUNDCOLOR,
+                1.0, BitsPerChannelType.EIGHT);
+            if (source.mode === DocumentMode.RGB && source.colorProfileType === ColorProfile.NONE) {
+                working.colorProfileType = ColorProfile.NONE;
+            }
+        }
+        app.backgroundColor = originalBackgroundColor;
+        originalBackgroundColor = null;
+        app.activeDocument = source;
+        sourceLayer.duplicate(working, ElementPlacement.PLACEATBEGINNING);
+        app.activeDocument = working;
+        working.activeLayer.visible = true;
+        working.flatten();
+        var originalWidth = Math.round(source.width.as("px"));
+        var originalHeight = Math.round(source.height.as("px"));
+        var scale = Math.min(1, Number(maxWidth) / originalWidth, Number(maxHeight) / originalHeight);
+        var previewWidth = Math.max(1, Math.round(originalWidth * scale));
+        var previewHeight = Math.max(1, Math.round(originalHeight * scale));
+        working.resizeImage(UnitValue(previewWidth, "px"), UnitValue(previewHeight, "px"), null, ResampleMethod.BICUBICSHARPER);
+        var jpeg = new JPEGSaveOptions();
+        jpeg.quality = 9;
+        jpeg.embedColorProfile = profileName !== "";
+        working.saveAs(new File(filePath), jpeg, true, Extension.LOWERCASE);
+        return "OK|" + source.id + "|" + sourceLayer.id + "|" + originalWidth + "|" + originalHeight +
+            "|" + previewWidth + "|" + previewHeight;
+    } catch (error) {
+        return "ERROR|" + error.message;
+    } finally {
+        if (working) { try { working.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {} }
+        try { app.activeDocument = source; } catch (activeError) {}
+        if (originalBackgroundColor) { try { app.backgroundColor = originalBackgroundColor; } catch (colorError) {} }
+        app.displayDialogs = originalDialogs;
+    }
 }
 
 function ST_findLayerById(container, layerId) {

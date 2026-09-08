@@ -10,7 +10,7 @@
   var running = false;
   var documentAvailable = false;
   var detectingDocument = false;
-  var activeLayerInfo = { supported: false, coverage: 'UNSUPPORTED', hasSelection: false, hasMask: false };
+  var activeLayerInfo = { supported: false, coverage: 'UNSUPPORTED', hasSelection: false, hasMask: false, documentId:0, layerId:0 };
   var executableAvailable = false;
   var executableValidationToken = 0;
   var executableValidationTimer = null;
@@ -24,6 +24,14 @@
   var activeRunSkyMaskToken = '';
   var activeRunLayerIds = [];
   var maxProcessLogLength = 65536;
+  var activeFeature = 'starnet';
+  var stretchRunning = false;
+  var stretchPreviewFile = '';
+  var stretchPreviewInfo = null;
+  var stretchSettings = { preset:'15% Bg, 3 sigma', strength:50, saturation:1, skyOnly:false };
+  var lastStretchCommandId = '';
+  var stretchSessionId = Date.now() + '_' + Math.random();
+  var stretchCancelRequested = false;
   var elements = {
     targetStatus: document.getElementById('targetStatus'),
     helpButton: document.getElementById('helpButton'),
@@ -51,6 +59,23 @@
     status: document.getElementById('status'),
     message: document.getElementById('message')
   };
+  elements.starNetTab = document.getElementById('starNetTab');
+  elements.stretchTab = document.getElementById('stretchTab');
+  elements.starNetPanel = document.getElementById('starNetPanel');
+  elements.stretchPanel = document.getElementById('stretchPanel');
+  elements.stretchSummary = document.getElementById('stretchSummary');
+  elements.stretchScopeHint = document.getElementById('stretchScopeHint');
+  elements.stretchDetailsToggle = document.getElementById('stretchDetailsToggle');
+  elements.stretchDetailsPanel = document.getElementById('stretchDetailsPanel');
+  elements.stretchDetailsToggleText = document.getElementById('stretchDetailsToggleText');
+  elements.stretchDetailsChevron = document.getElementById('stretchDetailsChevron');
+  elements.openStretchEditor = document.getElementById('openStretchEditor');
+  elements.createStretchLayer = document.getElementById('createStretchLayer');
+  elements.stretchProgress = document.getElementById('stretchProgress');
+  elements.stretchProgressBar = document.getElementById('stretchProgressBar');
+  elements.stretchStatus = document.getElementById('stretchStatus');
+  elements.stretchMessage = document.getElementById('stretchMessage');
+  elements.cancelStretch = document.getElementById('cancelStretch');
 
   try {
     if (window.__adobe_cep__ && typeof CSInterface !== 'undefined') csInterface = new CSInterface();
@@ -147,11 +172,19 @@
     elements.detailsChevron.textContent = open ? '▴' : '▾';
   }
 
+  function setStretchDetailsOpen(open) {
+    elements.stretchDetailsPanel.classList.toggle('hidden', !open);
+    elements.stretchDetailsToggle.classList.toggle('active', open);
+    elements.stretchDetailsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    elements.stretchDetailsToggleText.textContent = open ? '세부 설정 닫기' : '세부 설정 보기';
+    elements.stretchDetailsChevron.textContent = open ? '▴' : '▾';
+  }
+
   function updateRunButton() {
     var target = document.querySelector('input[name="processingTarget"]:checked');
     var layerReady = !target || target.value !== 'layer' || activeLayerInfo.supported;
     var skyReady = !target || target.value !== 'sky' || activeLayerInfo.hasSelection || activeLayerInfo.hasMask;
-    elements.runButton.disabled = running || !documentAvailable || !layerReady || !skyReady ||
+    elements.runButton.disabled = running || stretchRunning || !documentAvailable || !layerReady || !skyReady ||
       !executableAvailable || !selectedResults(null).length;
   }
 
@@ -184,9 +217,36 @@
     }
   }
 
+  function updateStretchStatus() {
+    var statusClass = 'preflight-status scope-hint';
+    var ready = documentAvailable && activeLayerInfo.supported;
+    if (!documentAvailable) {
+      setStatus(elements.stretchScopeHint, statusClass, 'Photoshop 문서를 먼저 여세요.', 'error');
+    } else if (!activeLayerInfo.supported) {
+      setStatus(elements.stretchScopeHint, statusClass, '사용 불가 · 일반 픽셀 레이어를 선택하세요.', 'error');
+    } else if (stretchSettings.skyOnly && activeLayerInfo.hasSelection) {
+      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 선택 영역으로 결과 범위를 제한합니다.', '');
+    } else if (stretchSettings.skyOnly && activeLayerInfo.hasMask) {
+      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 현재 레이어 마스크로 결과 범위를 제한합니다.', '');
+    } else if (stretchSettings.skyOnly) {
+      ready = false;
+      setStatus(elements.stretchScopeHint, statusClass, '사용 불가 · 선택 영역 또는 현재 레이어 마스크가 필요합니다.', 'error');
+    } else if (activeLayerInfo.coverage === 'PARTIAL') {
+      setStatus(elements.stretchScopeHint, statusClass, '사용 가능 · 빈 영역은 검정으로 채워집니다.', 'warning');
+    } else {
+      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 전체 프레임 픽셀 레이어입니다.', '');
+    }
+    var busy = running || stretchRunning;
+    elements.createStretchLayer.disabled = busy || !ready;
+    elements.openStretchEditor.disabled = busy || !documentAvailable || !activeLayerInfo.supported;
+    elements.stretchDetailsToggle.disabled = busy;
+    var controls = document.querySelectorAll('input[name=stretchScope]');
+    for (var index=0; index<controls.length; index++) controls[index].disabled = busy;
+  }
+
   function setConfigurationDisabled(disabled) {
     var controls = document.querySelectorAll(
-      'input[name="processingTarget"], #importStarless, #importStars, #importBoost, #upsample, #largeStarStrength, #exePath, #browsePath, #savePath, #helpButton, #closeHelp, #settingsButton, #closeSettings, #detailsToggle'
+      'input[name="processingTarget"], #importStarless, #importStars, #importBoost, #upsample, #largeStarStrength, #exePath, #browsePath, #savePath, #helpButton, #closeHelp, #settingsButton, #closeSettings, #detailsToggle, #starNetTab, #stretchTab'
     );
     for (var index = 0; index < controls.length; index++) controls[index].disabled = disabled;
   }
@@ -203,7 +263,7 @@
   }
 
   function detectDocument() {
-    if (running || detectingDocument) return;
+    if (running || stretchRunning || detectingDocument) return;
     detectingDocument = true;
     scriptCall('ST_getActiveDocumentInfo', [], function (result) {
       detectingDocument = false;
@@ -214,13 +274,16 @@
           supported: parts[5] === '1',
           coverage: parts[6] || 'UNSUPPORTED',
           hasSelection: parts[7] === '1',
-          hasMask: parts[8] === '1'
+          hasMask: parts[8] === '1',
+          documentId: Number(parts[9]) || 0,
+          layerId: Number(parts[10]) || 0
         };
       } else {
         documentAvailable = false;
-        activeLayerInfo = { supported: false, coverage: 'UNSUPPORTED', hasSelection: false, hasMask: false };
+        activeLayerInfo = { supported: false, coverage: 'UNSUPPORTED', hasSelection: false, hasMask: false, documentId:0, layerId:0 };
       }
       updateTargetStatus();
+      updateStretchStatus();
       updateRunButton();
     });
   }
@@ -340,7 +403,8 @@
     var cutoff = Date.now() - (24 * 60 * 60 * 1000);
     try {
       fs.readdirSync(folder).forEach(function (name) {
-        if (!/^starnet2_.*_(input|starless|stars|mask)\.tif$/i.test(name)) return;
+        if (!/^starnet2_.*_(input|starless|stars|mask|output)\.tif$/i.test(name) &&
+            !/^stretch_preview_.*\.jpg$/i.test(name)) return;
         var filePath = path.join(folder, name);
         try {
           if (fs.statSync(filePath).mtime.getTime() < cutoff) fs.unlinkSync(filePath);
@@ -437,7 +501,7 @@
   }
 
   function runProcess() {
-    if (running) return;
+    if (running || stretchRunning) return;
     if ((!csInterface && !(window.__adobe_cep__ && typeof window.__adobe_cep__.evalScript === 'function')) || !childProcess) {
       finish('CEP/Node 환경에서 실행하세요.', 'error');
       return;
@@ -620,6 +684,182 @@
     });
   }
 
+  function setFeature(feature) {
+    activeFeature = feature === 'stretch' ? 'stretch' : 'starnet';
+    elements.starNetPanel.classList.toggle('hidden', activeFeature !== 'starnet');
+    elements.stretchPanel.classList.toggle('hidden', activeFeature !== 'stretch');
+    elements.starNetTab.classList.toggle('active', activeFeature === 'starnet');
+    elements.stretchTab.classList.toggle('active', activeFeature === 'stretch');
+    if (activeFeature === 'stretch') updateStretchStatus();
+  }
+
+  function stretchExchangeFile(name) {
+    var folder = tempFolder();
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder);
+    return path.join(folder, name);
+  }
+
+  function updateStretchSummary() {
+    elements.stretchSummary.textContent = stretchSettings.preset + ' · Strength ' +
+      Math.round(stretchSettings.strength) + '% · Saturation ' + Number(stretchSettings.saturation).toFixed(1);
+    var controls = document.querySelectorAll('input[name="stretchScope"]');
+    for (var index=0; index<controls.length; index++) controls[index].checked = controls[index].value === (stretchSettings.skyOnly ? 'sky' : 'layer');
+  }
+
+  function writeStretchState() {
+    if (!fs || !stretchPreviewInfo || !stretchPreviewFile) return;
+    var state = {
+      sessionId:stretchSessionId,
+      source:'현재 레이어 · ' + stretchPreviewInfo.width + ' × ' + stretchPreviewInfo.height,
+      previewFile:stretchPreviewFile, preset:stretchSettings.preset,
+      strength:stretchSettings.strength, saturation:stretchSettings.saturation,
+      skyOnly:stretchSettings.skyOnly, documentId:stretchPreviewInfo.documentId,
+      layerId:stretchPreviewInfo.layerId, updatedAt:Date.now()
+    };
+    try { fs.writeFileSync(stretchExchangeFile('stretch_editor_state.json'), JSON.stringify(state), 'utf8'); } catch (_) {}
+  }
+
+  function openStretchEditor() {
+    if (!fs || !path || !documentAvailable || !activeLayerInfo.supported) {
+      elements.stretchMessage.textContent = '일반 픽셀 레이어를 선택하세요.';
+      elements.stretchMessage.className = 'message error';
+      return;
+    }
+    var oldPreviewFile = stretchPreviewFile;
+    stretchPreviewFile = stretchExchangeFile('stretch_preview_' + Date.now() + '.jpg');
+    if (oldPreviewFile && oldPreviewFile !== stretchPreviewFile) removeFiles({preview:oldPreviewFile});
+    elements.stretchMessage.textContent = 'Stretch Preview를 준비하고 있습니다.';
+    elements.stretchMessage.className = 'message';
+    scriptCall('ST_prepareStretchPreview', [stretchPreviewFile, 1200, 900], function (result) {
+      var parts = (result || '').split('|');
+      if (parts[0] !== 'OK') {
+        elements.stretchMessage.textContent = parts.slice(1).join('|') || 'Preview 생성에 실패했습니다.';
+        elements.stretchMessage.className = 'message error';
+        return;
+      }
+      stretchPreviewInfo = { documentId:Number(parts[1]), layerId:Number(parts[2]), width:Number(parts[3]), height:Number(parts[4]) };
+      writeStretchState();
+      elements.stretchMessage.textContent = '';
+      try {
+        if (window.__adobe_cep__ && window.__adobe_cep__.requestOpenExtension) {
+          window.__adobe_cep__.requestOpenExtension('com.drmedia.starnet.stretcheditor', '');
+        } else {
+          window.open('stretch-editor-window.html','StarNet2StretchEditor','width=1100,height=800,resizable=yes,scrollbars=no');
+        }
+      } catch (error) {
+        elements.stretchMessage.textContent = 'Stretch Editor 열기 실패: ' + error.message;
+        elements.stretchMessage.className = 'message error';
+      }
+    });
+  }
+
+  function finishStretch(message, type) {
+    stretchRunning = false;
+    stretchCancelRequested = false;
+    elements.createStretchLayer.disabled = false;
+    elements.createStretchLayer.classList.remove('hidden');
+    elements.openStretchEditor.disabled = false;
+    elements.cancelStretch.disabled = false;
+    elements.cancelStretch.classList.add('hidden');
+    elements.stretchProgress.classList.add('hidden');
+    elements.stretchMessage.textContent = message || '';
+    elements.stretchMessage.className = 'message' + (type ? ' ' + type : '');
+    updateRunButton();
+    updateStretchStatus();
+    detectDocument();
+  }
+
+  function cancelStretch() {
+    if (!stretchRunning || stretchCancelRequested) return;
+    stretchCancelRequested = true;
+    elements.cancelStretch.disabled = true;
+    elements.stretchStatus.textContent = 'Stretch 취소 중…';
+  }
+
+  function runStretch(expectedTarget) {
+    if (stretchRunning || running) return;
+    if (!fs || !window.StarNetStretchProcessor ||
+        typeof window.StarNetStretchProcessor.stretchTiffAsync !== 'function' ||
+        !documentAvailable || !activeLayerInfo.supported) {
+      finishStretch('일반 픽셀 레이어를 선택하세요.', 'error'); return;
+    }
+    var settings = {
+      preset:stretchSettings.preset,
+      strength:window.StarNetStretchProcessor.normalizeStrength(stretchSettings.strength),
+      saturation:window.StarNetStretchProcessor.normalizeSaturation(stretchSettings.saturation),
+      skyOnly:!!stretchSettings.skyOnly
+    };
+    var target = expectedTarget && expectedTarget.documentId && expectedTarget.layerId ? expectedTarget : {
+      documentId:activeLayerInfo.documentId,
+      layerId:activeLayerInfo.layerId
+    };
+    if (!target.documentId || !target.layerId) {
+      finishStretch('처리할 문서와 레이어를 다시 선택하세요.', 'error'); return;
+    }
+    if (settings.skyOnly && !activeLayerInfo.hasSelection && !activeLayerInfo.hasMask) {
+      finishStretch('지정 영역에는 Photoshop 선택 영역 또는 현재 레이어 마스크가 필요합니다.', 'error'); return;
+    }
+    stretchRunning = true;
+    stretchCancelRequested = false;
+    elements.createStretchLayer.disabled = true; elements.openStretchEditor.disabled = true;
+    elements.createStretchLayer.classList.add('hidden');
+    elements.cancelStretch.disabled = false; elements.cancelStretch.classList.remove('hidden');
+    updateStretchStatus();
+    updateRunButton();
+    elements.stretchProgress.classList.remove('hidden'); elements.stretchProgressBar.style.width='10%';
+    elements.stretchStatus.textContent='16-bit TIFF 준비 중…'; elements.stretchMessage.textContent='';
+    var token='starnet2_stretch_'+Date.now(), folder=tempFolder();
+    var input=path.join(folder,token+'_input.tif'), output=path.join(folder,token+'_output.tif');
+    scriptCall('ST_prepareInput',[input,settings.skyOnly?'layer-sky':'layer',target.documentId,target.layerId],function(prepared){
+      var parts=(prepared||'').split('|'), maskToken='';
+      try { maskToken=decodeURIComponent(parts[6]||''); } catch(_) {}
+      if(parts[0]!=='OK'){removeFiles({input:input,output:output});finishStretch(parts.slice(1).join('|')||'입력 TIFF 생성 실패','error');return;}
+      var profileName='';try{profileName=decodeURIComponent(parts[5]||'');}catch(_){}
+      if(stretchCancelRequested){
+        removeFiles({input:input,output:output});
+        finalizeSkyMask(parts[1],maskToken,function(){finishStretch('Stretch 처리를 취소했습니다.','');});
+        return;
+      }
+      elements.stretchProgressBar.style.width='45%';elements.stretchStatus.textContent='Stretch 계산 중…';
+      window.StarNetStretchProcessor.stretchTiffAsync(fs,input,output,settings.preset,settings.saturation,settings.strength,{
+        isCancelled:function(){return stretchCancelRequested;},
+        onProgress:function(percent){
+          elements.stretchProgressBar.style.width=(45+percent*0.4)+'%';
+          elements.stretchStatus.textContent='Stretch 계산 중… '+Math.round(percent)+'%';
+        }
+      },function(error){
+        if(error){
+          removeFiles({input:input,output:output});
+          finalizeSkyMask(parts[1],maskToken,function(){finishStretch(error.cancelled?'Stretch 처리를 취소했습니다.':('Stretch 처리 실패: '+error.message),error.cancelled?'':'error');});
+          return;
+        }
+        elements.stretchProgressBar.style.width='85%';elements.stretchStatus.textContent='결과 레이어 생성 중…';
+        elements.cancelStretch.disabled=true;
+        var name='Stretched ('+settings.preset+', Strength '+Math.round(settings.strength)+'%, Saturation '+Number(settings.saturation).toFixed(1)+')';
+        scriptCall('ST_importResult',[output,parts[1],name,parts[2]||'',parts[4]||'NONE',profileName,maskToken,100],function(imported){
+          removeFiles({input:input,output:output});finalizeSkyMask(parts[1],maskToken,function(cleanupError){
+            var ok=(imported||'').indexOf('OK|')===0;
+            finishStretch(ok&&!cleanupError?'Stretched 레이어를 활성 레이어 바로 위에 생성했습니다.':('결과 생성 실패: '+(cleanupError?cleanupError.message:imported)),ok&&!cleanupError?'ok':'error');
+          });
+        });
+      });
+    });
+  }
+
+  function pollStretchCommand() {
+    if (!fs || !path || !os) return;
+    var file;
+    try { file=stretchExchangeFile('stretch_editor_command.json'); if(!fs.existsSync(file))return; var command=JSON.parse(fs.readFileSync(file,'utf8')); fs.unlinkSync(file);
+      if(command.sessionId!==stretchSessionId)return;
+      if(command.id&&command.id===lastStretchCommandId)return; lastStretchCommandId=command.id||'';
+      if(command.action==='settings'&&command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.strength=window.StarNetStretchProcessor.normalizeStrength(command.value.strength);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);stretchSettings.skyOnly=!!command.value.skyOnly;updateStretchSummary();updateStretchStatus();writeStretchState();}
+      else if(command.action==='create'){
+        if(command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.strength=window.StarNetStretchProcessor.normalizeStrength(command.value.strength);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);stretchSettings.skyOnly=!!command.value.skyOnly;updateStretchSummary();updateStretchStatus();writeStretchState();}
+        runStretch({documentId:Number(command.value&&command.value.documentId)||0,layerId:Number(command.value&&command.value.layerId)||0});
+      }
+    } catch(_) {}
+  }
+
   document.getElementById('savePath').addEventListener('click', function () {
     try { localStorage.setItem('starnet2.exePath', elements.exePath.value.trim() || 'starnet2.exe'); } catch (error) {}
     showMessage('StarNet2 실행 파일 경로를 저장하고 확인합니다.', 'ok');
@@ -635,6 +875,9 @@
   elements.closeHelp.addEventListener('click', function () { setHelpOpen(false); });
   elements.detailsToggle.addEventListener('click', function () {
     setDetailsOpen(elements.detailsPanel.classList.contains('hidden'));
+  });
+  elements.stretchDetailsToggle.addEventListener('click', function () {
+    setStretchDetailsOpen(elements.stretchDetailsPanel.classList.contains('hidden'));
   });
   elements.largeStarStrength.addEventListener('input', function () {
     elements.largeStarStrengthValue.textContent = elements.largeStarStrength.value + '%';
@@ -674,14 +917,28 @@
   }
   elements.runButton.addEventListener('click', runProcess);
   elements.cancelButton.addEventListener('click', cancelProcess);
+  elements.starNetTab.addEventListener('click', function(){setFeature('starnet');});
+  elements.stretchTab.addEventListener('click', function(){setFeature('stretch');});
+  elements.openStretchEditor.addEventListener('click', openStretchEditor);
+  elements.createStretchLayer.addEventListener('click', function(){runStretch();});
+  elements.cancelStretch.addEventListener('click', cancelStretch);
+  var stretchScopeControls=document.querySelectorAll('input[name="stretchScope"]');
+  for(var stretchScopeIndex=0;stretchScopeIndex<stretchScopeControls.length;stretchScopeIndex++){
+    stretchScopeControls[stretchScopeIndex].addEventListener('change',function(){stretchSettings.skyOnly=this.value==='sky';updateStretchSummary();updateStretchStatus();writeStretchState();});
+  }
   try { elements.exePath.value = localStorage.getItem('starnet2.exePath') || 'starnet2.exe'; } catch (error) {}
   cleanupStaleTempFiles();
+  try { var staleStretchCommand=stretchExchangeFile('stretch_editor_command.json'); if(fs.existsSync(staleStretchCommand))fs.unlinkSync(staleStretchCommand); } catch (_) {}
+  updateStretchSummary();
+  updateStretchStatus();
+  window.setInterval(pollStretchCommand,250);
   detectDocument();
   validateExecutable();
   window.setInterval(detectDocument, 1500);
   window.addEventListener('beforeunload', function () {
     try { if (activeProcess) activeProcess.kill(); } catch (error) {}
     removeFiles(currentFiles);
+    removeFiles({preview:stretchPreviewFile});
     if (activeRunDocumentId) {
       var cleanupScript = 'ST_abortRun(' + [activeRunDocumentId, activeRunSkyMaskToken, activeRunLayerIds]
         .map(function (arg) { return JSON.stringify(arg); }).join(',') + ')';
