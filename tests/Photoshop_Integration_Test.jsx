@@ -176,20 +176,21 @@
             }
         });
 
-        test('stretch layer-sky uses active layer and applies the region mask', function () {
+        test('stretch automatically uses the selection as the result mask', function () {
             var document = app.documents.add(32, 32, 72, 'ST_STRETCH_REGION', NewDocumentMode.RGB, DocumentFill.WHITE);
             var stretchFile = new File(Folder.temp.fsName + '/starnet2_test_stretch_region.tif');
             removeFile(stretchFile);
             try {
                 var sourceLayer = document.activeLayer;
+                var sourceLayerId = sourceLayer.id;
                 document.selection.select([[0, 0], [16, 0], [16, 32], [0, 32]]);
-                var prepared = ST_prepareInput(stretchFile.fsName, 'layer-sky').split('|');
-                assertTrue(prepared[0] === 'OK', 'stretch layer-sky export failed: ' + prepared.join('|'));
-                assertTrue(Number(prepared[2]) === sourceLayer.id, 'stretch source layer anchor was not retained');
+                var prepared = ST_prepareInput(stretchFile.fsName, 'layer-auto').split('|');
+                assertTrue(prepared[0] === 'OK', 'automatic Stretch export failed: ' + prepared.join('|'));
+                assertTrue(Number(prepared[2]) === sourceLayerId, 'stretch source layer anchor was not retained');
                 var maskToken = decodeURIComponent(prepared[6]);
                 assertTrue(maskToken.indexOf('S:') === 0, 'stretch selection token was not created');
 
-                var imported = ST_importResult(stretchFile.fsName, document.id, 'Stretched test', sourceLayer.id,
+                var imported = ST_importResult(stretchFile.fsName, document.id, 'Stretched test', sourceLayerId,
                     prepared[4], decodeURIComponent(prepared[5]), maskToken, 100).split('|');
                 assertTrue(imported[0] === 'OK', 'stretch result import failed: ' + imported.join('|'));
                 var resultLayer = ST_findLayerById(document, Number(imported[1]));
@@ -202,6 +203,61 @@
                 assertTrue(ST_hasSelection(document), 'stretch source selection was not restored');
                 resultLayer.remove();
             } finally {
+                removeFile(stretchFile);
+                document.close(SaveOptions.DONOTSAVECHANGES);
+            }
+        });
+
+        test('stretch copies an existing layer mask without baking it into the input', function () {
+            var document = app.documents.add(32, 32, 72, 'ST_STRETCH_LAYER_MASK', NewDocumentMode.RGB, DocumentFill.WHITE);
+            var stretchFile = new File(Folder.temp.fsName + '/starnet2_test_stretch_layer_mask.tif');
+            var verification = null;
+            var stage = 'fixture';
+            removeFile(stretchFile);
+            try {
+                var sourceLayer = document.activeLayer;
+                stage = 'create source mask';
+                document.selection.select([[0, 0], [32, 0], [32, 16], [0, 16]]);
+                ST_addRevealSelectionMask();
+                document.selection.deselect();
+
+                stage = 'create verification document';
+                verification = document.duplicate('ST_MASK_DISCARD_CHECK', false);
+                app.activeDocument = verification;
+                stage = 'remove duplicated mask';
+                ST_removeActiveLayerMaskWithoutApplying(verification);
+                stage = 'verify duplicated mask';
+                assertTrue(!ST_activeLayerHasMask(verification), 'mask remained on the Stretch input layer');
+                assertTrue(ST_layerCoversDocument(verification, verification.activeLayer),
+                    'hidden source pixels were discarded with the input mask');
+                stage = 'close verification document';
+                verification.close(SaveOptions.DONOTSAVECHANGES);
+                verification = null;
+                app.activeDocument = document;
+
+                stage = 'prepare automatic input';
+                var prepared = ST_prepareInput(stretchFile.fsName, 'layer-auto').split('|');
+                assertTrue(prepared[0] === 'OK', 'automatic layer-mask Stretch export failed: ' + prepared.join('|'));
+                var maskToken = decodeURIComponent(prepared[6]);
+                assertTrue(maskToken.indexOf('M:') === 0, 'existing layer mask token was not created');
+
+                stage = 'import automatic result';
+                var imported = ST_importResult(stretchFile.fsName, document.id, 'Stretched mask test', Number(prepared[2]),
+                    prepared[4], decodeURIComponent(prepared[5]), maskToken, 100).split('|');
+                assertTrue(imported[0] === 'OK', 'masked Stretch result import failed: ' + imported.join('|'));
+                stage = 'verify imported mask';
+                assertTrue(ST_activeLayerHasMask(document), 'existing layer mask was not copied to the Stretch result');
+                stage = 'remove imported result';
+                ST_findLayerById(document, Number(imported[1])).remove();
+
+                stage = 'finalize automatic mask';
+                var finalized = ST_finalizeSkyMask(document.id, maskToken);
+                assertTrue(finalized === 'OK', 'automatic layer-mask cleanup failed: ' + finalized);
+                assertTrue(!ST_hasSelection(document), 'selection remained after automatic layer-mask mode');
+            } catch (error) {
+                throw new Error(stage + ': ' + error.message);
+            } finally {
+                if (verification) { try { verification.close(SaveOptions.DONOTSAVECHANGES); } catch (verificationCloseError) {} }
                 removeFile(stretchFile);
                 document.close(SaveOptions.DONOTSAVECHANGES);
             }
@@ -306,18 +362,18 @@
             }
         });
 
-        test('selection is applied to every sky result and restored', function () {
+        test('Star Removal automatically applies the selection to every result', function () {
             var document = app.documents.add(32, 32, 72, 'ST_SKY_SELECTION', NewDocumentMode.RGB, DocumentFill.WHITE);
             var skyFile = new File(Folder.temp.fsName + '/starnet2_test_sky_selection.tif');
             removeFile(skyFile);
             try {
                 document.selection.select([[0, 0], [16, 0], [16, 32], [0, 32]]);
-                var prepared = ST_prepareInput(skyFile.fsName, 'sky').split('|');
-                assertTrue(prepared[0] === 'OK', 'sky selection export failed: ' + prepared.join('|'));
+                var prepared = ST_prepareInput(skyFile.fsName, 'layer-auto').split('|');
+                assertTrue(prepared[0] === 'OK', 'automatic selection export failed: ' + prepared.join('|'));
                 var maskToken = decodeURIComponent(prepared[6]);
                 assertTrue(maskToken.indexOf('S:') === 0, 'selection token was not created');
 
-                var anchorId = document.activeLayer.id;
+                var anchorId = Number(prepared[2]);
                 var profileName = document.colorProfileName;
                 var first = ST_importResult(skyFile.fsName, document.id, 'Starless', anchorId, 'TAGGED', profileName, maskToken).split('|');
                 assertTrue(first[0] === 'OK', 'first sky result import failed: ' + first.join('|'));
@@ -340,7 +396,7 @@
             }
         });
 
-        test('active layer mask can provide the sky region', function () {
+        test('Star Removal automatically copies the active layer mask', function () {
             var document = app.documents.add(32, 32, 72, 'ST_SKY_LAYER_MASK', NewDocumentMode.RGB, DocumentFill.WHITE);
             var skyFile = new File(Folder.temp.fsName + '/starnet2_test_sky_layer_mask.tif');
             removeFile(skyFile);
@@ -350,8 +406,8 @@
                 document.selection.deselect();
                 assertTrue(ST_activeLayerHasMask(document), 'source layer mask was not created');
 
-                var prepared = ST_prepareInput(skyFile.fsName, 'sky').split('|');
-                assertTrue(prepared[0] === 'OK', 'layer-mask sky export failed: ' + prepared.join('|'));
+                var prepared = ST_prepareInput(skyFile.fsName, 'layer-auto').split('|');
+                assertTrue(prepared[0] === 'OK', 'automatic layer-mask export failed: ' + prepared.join('|'));
                 var maskToken = decodeURIComponent(prepared[6]);
                 assertTrue(maskToken.indexOf('M:') === 0, 'layer-mask token was not created');
                 var imported = ST_importResult(skyFile.fsName, document.id, 'Starless', '', 'TAGGED', document.colorProfileName, maskToken).split('|');

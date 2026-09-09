@@ -6,21 +6,35 @@
   <link rel="stylesheet" href="stretch-editor-window.css">
 </head>
 <body>
-  <header><div><h1>StarNet2 Stretch Editor</h1><div id="sourceStatus">메인 패널에 연결하는 중…</div></div><button id="closeEditor">창 닫기</button></header>
-  <div class="toolbar">
-    <label>Stretch Preset<select id="preset"><option>10% Bg, 3 sigma</option><option selected>15% Bg, 3 sigma</option><option>20% Bg, 3 sigma</option><option>30% Bg, 2 sigma</option></select></label>
-    <label class="range-control">Strength <output id="strengthValue">50%</output><input id="strength" type="range" min="0" max="100" step="5" value="50"></label>
-    <label class="range-control">Saturation <output id="saturationValue">1.0</output><input id="saturation" type="range" min="0" max="3" step="0.1" value="1"></label>
-    <label class="check"><input id="skyOnly" type="checkbox"> 지정 영역</label>
-    <button id="createLayer" class="primary">Stretched 레이어 생성</button>
+  <header><div id="sourceStatus">메인 패널에 연결하는 중…</div><button id="closeEditor">창 닫기</button></header>
+  <div class="controls-card">
+    <div class="toolbar">
+      <label class="preset-control">Stretch Preset<select id="preset"><option>10% Bg, 3 sigma</option><option selected>15% Bg, 3 sigma</option><option>20% Bg, 3 sigma</option><option>30% Bg, 2 sigma</option><option>사용자 설정</option></select></label>
+      <label class="range-control">Background <output id="backgroundValue">15%</output><input id="background" type="range" min="5" max="40" step="1" value="15"></label>
+      <label class="range-control">Black Point <output id="sigmaValue">3.0 sigma</output><input id="sigma" type="range" min="1" max="5" step="0.1" value="3"></label>
+      <label class="range-control">Saturation <output id="saturationValue">1.0</output><input id="saturation" type="range" min="0" max="3" step="0.1" value="1"></label>
+    </div>
+    <div class="action-row">
+      <div class="mask-summary"><span>결과 마스크</span><strong id="maskStatus">확인 중</strong></div>
+      <button id="createLayer" class="primary">Stretched 레이어 생성</button>
+    </div>
   </div>
-  <div class="preview-modes" role="group" aria-label="미리보기 비교 방식">
-    <button id="viewOriginal" type="button" data-view="original">원본</button>
-    <button id="viewStretched" type="button" data-view="stretched">Stretch</button>
-    <button id="viewSplit" class="active" type="button" data-view="split">좌우 비교</button>
+  <div class="preview-toolbar">
+    <div class="preview-modes" role="group" aria-label="미리보기 비교 방식">
+      <button id="viewOriginal" type="button" data-view="original">원본</button>
+      <button id="viewStretched" type="button" data-view="stretched">Stretch</button>
+      <button id="viewSplit" class="active" type="button" data-view="split">좌우 비교</button>
+    </div>
+    <div class="zoom-controls" role="group" aria-label="미리보기 확대/축소">
+      <button id="zoomFit" class="active" type="button">화면 맞춤</button>
+      <button id="zoomActual" type="button">100%</button>
+      <button id="zoomOut" type="button" aria-label="축소">−</button>
+      <output id="zoomValue">맞춤</output>
+      <button id="zoomIn" type="button" aria-label="확대">＋</button>
+    </div>
   </div>
   <main><canvas id="preview" class="split-view"></canvas><div id="empty">Preview를 준비하고 있습니다.</div></main>
-  <footer>좌우 비교에서는 이미지를 클릭하거나 구분선을 드래그할 수 있습니다. Preview는 화면 확인용 8-bit JPEG이며 실제 결과는 16-bit TIFF로 처리됩니다.</footer>
+  <footer>Preview 8-bit JPEG · 결과 16-bit TIFF</footer>
   <script src="stretch-processor.js"></script>
   <script src="stretch-editor-window.js"></script>
 </body>

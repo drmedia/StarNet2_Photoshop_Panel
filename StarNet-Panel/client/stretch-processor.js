@@ -9,10 +9,10 @@
   var MAX_ROW_BYTES = 256 * 1024 * 1024;
 
   function preset(name) {
-    if (name === '10% Bg, 3 sigma') return { background: 0.10, sigma: 3 };
-    if (name === '15% Bg, 3 sigma') return { background: 0.15, sigma: 3 };
-    if (name === '20% Bg, 3 sigma') return { background: 0.20, sigma: 3 };
-    if (name === '30% Bg, 2 sigma') return { background: 0.30, sigma: 2 };
+    if (name === '10% Bg, 3 sigma') return { background: 10, sigma: 3 };
+    if (name === '15% Bg, 3 sigma') return { background: 15, sigma: 3 };
+    if (name === '20% Bg, 3 sigma') return { background: 20, sigma: 3 };
+    if (name === '30% Bg, 2 sigma') return { background: 30, sigma: 2 };
     throw new Error('지원하지 않는 Stretch preset입니다: ' + name);
   }
 
@@ -20,14 +20,23 @@
     return Math.max(minimum, Math.min(maximum, value));
   }
 
-  function normalizeStrength(value) {
+  function normalizeBackground(value) {
     value = Number(value);
-    return clamp(isFinite(value) ? value : 50, 0, 100);
+    return clamp(isFinite(value) ? value : 15, 5, 40);
+  }
+
+  function normalizeSigma(value) {
+    value = Number(value);
+    return clamp(isFinite(value) ? value : 3, 1, 5);
   }
 
   function normalizeSaturation(value) {
     value = Number(value);
     return clamp(isFinite(value) ? value : 1, 0, 3);
+  }
+
+  function stretchSetting(backgroundValue, sigmaValue) {
+    return { background: normalizeBackground(backgroundValue) / 100, sigma: normalizeSigma(sigmaValue) };
   }
 
   function checkedProduct(values, label) {
@@ -202,9 +211,9 @@
     return clamp(Math.round(mtf((normalized - parameter.shadow) / Math.max(1e-12, 1 - parameter.shadow), parameter.midtone) * maximum), 0, maximum);
   }
 
-  function stretchTiff(fs, sourcePath, destinationPath, presetName, saturationValue, strengthValue) {
-    var setting = preset(presetName), saturation = normalizeSaturation(saturationValue);
-    var strength = normalizeStrength(strengthValue) / 100, input = null, output = null;
+  function stretchTiff(fs, sourcePath, destinationPath, backgroundValue, sigmaValue, saturationValue) {
+    var setting = stretchSetting(backgroundValue, sigmaValue), saturation = normalizeSaturation(saturationValue);
+    var input = null, output = null;
     try {
       input = fs.openSync(sourcePath, 'r');
       var info = tiffInfo(fs, input), rowBytes = info.width * 6, row = Buffer.alloc(rowBytes);
@@ -223,7 +232,7 @@
           var at=x*6, rgb=[];
           for (channel=0; channel<3; channel++) {
             var original=row.readUInt16LE(at+channel*2), stretched=stretchValue(original,params[channel],65535);
-            rgb[channel]=Math.round(original+strength*(stretched-original));
+            rgb[channel]=stretched;
           }
           var gray=.299*rgb[0]+.587*rgb[1]+.114*rgb[2];
           for (channel=0; channel<3; channel++) row.writeUInt16LE(clamp(Math.round(gray+saturation*(rgb[channel]-gray)),0,65535),at+channel*2);
@@ -231,7 +240,8 @@
         writeExact(fs,output,row,header.pixelOffset+y*rowBytes);
       }
       fs.closeSync(output); output=null; fs.closeSync(input); input=null;
-      return { width:info.width, height:info.height, preset:presetName, strength:strengthValue, saturation:saturationValue };
+      return { width:info.width, height:info.height, background:normalizeBackground(backgroundValue),
+        sigma:normalizeSigma(sigmaValue), saturation:saturation };
     } catch (error) {
       try { if (output !== null) fs.closeSync(output); } catch (_) {}
       try { if (input !== null) fs.closeSync(input); } catch (_) {}
@@ -240,10 +250,10 @@
     }
   }
 
-  function stretchTiffAsync(fs, sourcePath, destinationPath, presetName, saturationValue, strengthValue, options, callback) {
+  function stretchTiffAsync(fs, sourcePath, destinationPath, backgroundValue, sigmaValue, saturationValue, options, callback) {
     options = options || {};
     callback = typeof callback === 'function' ? callback : function () {};
-    var setting, saturation, normalizedStrength, strength, input = null, output = null;
+    var setting, saturation, normalizedBackground, normalizedSigma, input = null, output = null;
     var info, rowBytes, row, histograms, stride, params, header;
     var phase = 'histogram', y = 0, completed = false;
 
@@ -275,15 +285,15 @@
       closeFiles();
       completed = true;
       report(100);
-      callback(null, { width:info.width, height:info.height, preset:presetName,
-        strength:normalizedStrength, saturation:saturation });
+      callback(null, { width:info.width, height:info.height, background:normalizedBackground,
+        sigma:normalizedSigma, saturation:saturation });
     }
 
     try {
-      setting = preset(presetName);
+      normalizedBackground = normalizeBackground(backgroundValue);
+      normalizedSigma = normalizeSigma(sigmaValue);
+      setting = stretchSetting(normalizedBackground, normalizedSigma);
       saturation = normalizeSaturation(saturationValue);
-      normalizedStrength = normalizeStrength(strengthValue);
-      strength = normalizedStrength / 100;
       input = fs.openSync(sourcePath, 'r');
       info = tiffInfo(fs, input);
       rowBytes = info.width * 6;
@@ -337,7 +347,7 @@
               for (var channel=0; channel<3; channel++) {
                 var original=row.readUInt16LE(at+channel*2);
                 var stretched=stretchValue(original,params[channel],65535);
-                rgb[channel]=Math.round(original+strength*(stretched-original));
+                rgb[channel]=stretched;
               }
               var gray=.299*rgb[0]+.587*rgb[1]+.114*rgb[2];
               for (var channel=0; channel<3; channel++) {
@@ -360,8 +370,8 @@
     setTimeout(step, 0);
   }
 
-  function stretchRgba8(imageData, presetName, saturationValue, strengthValue) {
-    var setting=preset(presetName), saturation=normalizeSaturation(saturationValue), strength=normalizeStrength(strengthValue)/100;
+  function stretchRgba8(imageData, backgroundValue, sigmaValue, saturationValue) {
+    var setting=stretchSetting(backgroundValue,sigmaValue), saturation=normalizeSaturation(saturationValue);
     var histograms=[[],[],[]], channel, bin;
     for(channel=0;channel<3;channel++) for(bin=0;bin<256;bin++) histograms[channel][bin]=0;
     var data=imageData.data;
@@ -370,7 +380,7 @@
     var output=new Uint8ClampedArray(data.length);
     for(at=0;at<data.length;at+=4){
       var rgb=[];
-      for(channel=0;channel<3;channel++){var original=data[at+channel], stretched=stretchValue(original,params[channel],255);rgb[channel]=original+strength*(stretched-original);}
+      for(channel=0;channel<3;channel++){var original=data[at+channel], stretched=stretchValue(original,params[channel],255);rgb[channel]=stretched;}
       var gray=.299*rgb[0]+.587*rgb[1]+.114*rgb[2];
       for(channel=0;channel<3;channel++) output[at+channel]=clamp(Math.round(gray+saturation*(rgb[channel]-gray)),0,255);
       output[at+3]=data[at+3];
@@ -378,7 +388,8 @@
     return output;
   }
 
-  return { preset:preset, normalizeStrength:normalizeStrength, normalizeSaturation:normalizeSaturation,
+  return { preset:preset, normalizeBackground:normalizeBackground, normalizeSigma:normalizeSigma,
+    normalizeSaturation:normalizeSaturation,
     stretchTiff:stretchTiff, stretchTiffAsync:stretchTiffAsync, stretchRgba8:stretchRgba8,
     _tiffInfo:tiffInfo, _outputHeader:outputHeader };
 }));

@@ -111,6 +111,17 @@ function ST_addRevealSelectionMask() {
     executeAction(charIDToTypeID("Mk  "), descriptor, DialogModes.NO);
 }
 
+function ST_removeActiveLayerMaskWithoutApplying(document) {
+    if (!ST_activeLayerHasMask(document)) return;
+    app.activeDocument = document;
+    var descriptor = new ActionDescriptor();
+    var maskReference = new ActionReference();
+    maskReference.putEnumerated(charIDToTypeID("Chnl"), charIDToTypeID("Chnl"), charIDToTypeID("Msk "));
+    descriptor.putReference(charIDToTypeID("null"), maskReference);
+    descriptor.putBoolean(stringIDToTypeID("apply"), false);
+    executeAction(charIDToTypeID("Dlt "), descriptor, DialogModes.NO);
+}
+
 function ST_skyMaskTokenParts(maskToken) {
     var token = String(maskToken || "");
     var separator = token.indexOf(":");
@@ -202,10 +213,13 @@ function ST_prepareInput(filePath, processingTarget, expectedDocumentId, expecte
     if (!app.documents.length) return "ERROR|No Photoshop document is open";
     var source = app.activeDocument;
     var mode = processingTarget === "layer" ? "layer" :
+        (processingTarget === "layer-auto" ? "layer-auto" :
         (processingTarget === "layer-sky" ? "layer-sky" :
-        (processingTarget === "sky" ? "sky" : "composite"));
-    var usesActiveLayer = mode === "layer" || mode === "layer-sky";
-    var usesSkyMask = mode === "sky" || mode === "layer-sky";
+        (processingTarget === "sky" ? "sky" : "composite")));
+    var usesActiveLayer = mode === "layer" || mode === "layer-sky" || mode === "layer-auto";
+    var usesSkyMask = mode === "sky" || mode === "layer-sky" ||
+        (mode === "layer-auto" && (ST_hasSelection(source) || ST_activeLayerHasMask(source)));
+    var removesInputMask = mode === "layer-auto";
     var sourceLayer = source.activeLayer;
     if (expectedDocumentId !== undefined && expectedDocumentId !== "" &&
             source.id !== Number(expectedDocumentId)) {
@@ -224,12 +238,14 @@ function ST_prepareInput(filePath, processingTarget, expectedDocumentId, expecte
     var preparedProfileMode = "NONE";
     var preparedProfileName = "";
     var originalBackgroundColor = null;
+    var originalSourceChannels = null;
     var originalDialogs = app.displayDialogs;
     var skyMaskToken = "";
     try {
         app.displayDialogs = DialogModes.NO;
         if (usesSkyMask) skyMaskToken = ST_captureSkyMask(source);
         if (usesActiveLayer) {
+            try { originalSourceChannels = source.activeChannels; } catch (sourceChannelError) {}
             originalBackgroundColor = app.backgroundColor;
             var black = new SolidColor();
             black.rgb.red = 0;
@@ -267,9 +283,12 @@ function ST_prepareInput(filePath, processingTarget, expectedDocumentId, expecte
             app.backgroundColor = originalBackgroundColor;
             originalBackgroundColor = null;
             app.activeDocument = source;
+            source.activeLayer = sourceLayer;
+            ST_activateCompositeChannels(source);
             sourceLayer.duplicate(working, ElementPlacement.PLACEATBEGINNING);
             app.activeDocument = working;
             working.activeLayer.visible = true;
+            if (removesInputMask) ST_removeActiveLayerMaskWithoutApplying(working);
         } else {
             working = source.duplicate("StarNet2 temporary input", false);
         }
@@ -297,6 +316,9 @@ function ST_prepareInput(filePath, processingTarget, expectedDocumentId, expecte
         if (originalBackgroundColor) {
             try { app.backgroundColor = originalBackgroundColor; } catch (colorError) {}
         }
+        if (originalSourceChannels) {
+            try { app.activeDocument = source; source.activeChannels = originalSourceChannels; } catch (sourceChannelRestoreError) {}
+        }
         app.displayDialogs = originalDialogs;
     }
 }
@@ -319,6 +341,7 @@ function ST_prepareStretchPreview(filePath, maxWidth, maxHeight) {
     if (!ST_isPixelLayer(sourceLayer)) return "ERROR|Stretch Preview에는 일반 픽셀 레이어가 필요합니다.";
     var working = null;
     var originalBackgroundColor = null;
+    var originalSourceChannels = null;
     var originalDialogs = app.displayDialogs;
     try {
         app.displayDialogs = DialogModes.NO;
@@ -342,9 +365,13 @@ function ST_prepareStretchPreview(filePath, maxWidth, maxHeight) {
         app.backgroundColor = originalBackgroundColor;
         originalBackgroundColor = null;
         app.activeDocument = source;
+        source.activeLayer = sourceLayer;
+        try { originalSourceChannels = source.activeChannels; } catch (sourceChannelError) {}
+        ST_activateCompositeChannels(source);
         sourceLayer.duplicate(working, ElementPlacement.PLACEATBEGINNING);
         app.activeDocument = working;
         working.activeLayer.visible = true;
+        ST_removeActiveLayerMaskWithoutApplying(working);
         working.flatten();
         var originalWidth = Math.round(source.width.as("px"));
         var originalHeight = Math.round(source.height.as("px"));
@@ -363,6 +390,7 @@ function ST_prepareStretchPreview(filePath, maxWidth, maxHeight) {
     } finally {
         if (working) { try { working.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {} }
         try { app.activeDocument = source; } catch (activeError) {}
+        if (originalSourceChannels) { try { source.activeChannels = originalSourceChannels; } catch (sourceChannelRestoreError) {} }
         if (originalBackgroundColor) { try { app.backgroundColor = originalBackgroundColor; } catch (colorError) {} }
         app.displayDialogs = originalDialogs;
     }
@@ -427,8 +455,13 @@ function ST_createLargeStarBoost(documentId, starsLayerId, anchorLayerId, largeS
 }
 
 function ST_importResult(filePath, documentId, layerName, anchorLayerId, profileMode, profileName, skyMaskToken, largeStarStrength) {
+    if (app.documents.length) {
+        try { ST_activateCompositeChannels(app.activeDocument); } catch (channelError) {}
+    }
     var target = ST_findDocumentById(Number(documentId));
     if (!target) return "ERROR|Original Photoshop document is no longer open";
+    app.activeDocument = target;
+    ST_activateCompositeChannels(target);
     var anchor = null;
     if (anchorLayerId !== undefined && anchorLayerId !== null && String(anchorLayerId) !== "") {
         anchor = ST_findLayerById(target, Number(anchorLayerId));

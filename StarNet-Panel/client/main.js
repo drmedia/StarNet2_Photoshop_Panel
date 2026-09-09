@@ -28,10 +28,11 @@
   var stretchRunning = false;
   var stretchPreviewFile = '';
   var stretchPreviewInfo = null;
-  var stretchSettings = { preset:'15% Bg, 3 sigma', strength:50, saturation:1, skyOnly:false };
+  var stretchSettings = { preset:'15% Bg, 3 sigma', background:15, sigma:3, saturation:1 };
   var lastStretchCommandId = '';
   var stretchSessionId = Date.now() + '_' + Math.random();
   var stretchCancelRequested = false;
+  var stretchEditorRun = { id:'', status:'idle', message:'' };
   var elements = {
     targetStatus: document.getElementById('targetStatus'),
     helpButton: document.getElementById('helpButton'),
@@ -45,8 +46,14 @@
     detailsPanel: document.getElementById('detailsPanel'),
     detailsToggleText: document.getElementById('detailsToggleText'),
     detailsChevron: document.getElementById('detailsChevron'),
+    importStarless: document.getElementById('importStarless'),
+    importStars: document.getElementById('importStars'),
+    importBoost: document.getElementById('importBoost'),
+    upsample: document.getElementById('upsample'),
+    largeStarControl: document.getElementById('largeStarControl'),
     largeStarStrength: document.getElementById('largeStarStrength'),
     largeStarStrengthValue: document.getElementById('largeStarStrengthValue'),
+    resetDetails: document.getElementById('resetDetails'),
     exePath: document.getElementById('exePath'),
     exeStatus: document.getElementById('exeStatus'),
     browsePath: document.getElementById('browsePath'),
@@ -63,12 +70,25 @@
   elements.stretchTab = document.getElementById('stretchTab');
   elements.starNetPanel = document.getElementById('starNetPanel');
   elements.stretchPanel = document.getElementById('stretchPanel');
-  elements.stretchSummary = document.getElementById('stretchSummary');
-  elements.stretchScopeHint = document.getElementById('stretchScopeHint');
+  elements.starTargetValue = document.getElementById('starTargetValue');
+  elements.starTargetBadge = document.getElementById('starTargetBadge');
+  elements.starMaskValue = document.getElementById('starMaskValue');
+  elements.starMaskBadge = document.getElementById('starMaskBadge');
+  elements.starMaskHint = document.getElementById('starMaskHint');
+  elements.stretchTargetValue = document.getElementById('stretchTargetValue');
+  elements.stretchTargetBadge = document.getElementById('stretchTargetBadge');
+  elements.stretchTargetHint = document.getElementById('stretchTargetHint');
+  elements.stretchMaskValue = document.getElementById('stretchMaskValue');
+  elements.stretchMaskBadge = document.getElementById('stretchMaskBadge');
+  elements.stretchMaskHint = document.getElementById('stretchMaskHint');
   elements.stretchDetailsToggle = document.getElementById('stretchDetailsToggle');
   elements.stretchDetailsPanel = document.getElementById('stretchDetailsPanel');
   elements.stretchDetailsToggleText = document.getElementById('stretchDetailsToggleText');
   elements.stretchDetailsChevron = document.getElementById('stretchDetailsChevron');
+  elements.stretchPresetBadge = document.getElementById('stretchPresetBadge');
+  elements.stretchBackgroundValue = document.getElementById('stretchBackgroundValue');
+  elements.stretchBlackPointValue = document.getElementById('stretchBlackPointValue');
+  elements.stretchSaturationValue = document.getElementById('stretchSaturationValue');
   elements.openStretchEditor = document.getElementById('openStretchEditor');
   elements.createStretchLayer = document.getElementById('createStretchLayer');
   elements.stretchProgress = document.getElementById('stretchProgress');
@@ -168,23 +188,50 @@
     elements.detailsPanel.classList.toggle('hidden', !open);
     elements.detailsToggle.classList.toggle('active', open);
     elements.detailsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    elements.detailsToggleText.textContent = open ? '세부 설정 닫기' : '세부 설정 보기';
     elements.detailsChevron.textContent = open ? '▴' : '▾';
+    updateDetailsUI();
+  }
+
+  function updateDetailsUI() {
+    var resultCount = (elements.importStarless.checked ? 1 : 0) +
+      (elements.importStars.checked ? 1 : 0) + (elements.importBoost.checked ? 1 : 0);
+    var isOpen = !elements.detailsPanel.classList.contains('hidden');
+    var summary = resultCount ? '결과 ' + resultCount + '개' : '결과 없음';
+    if (elements.importBoost.checked) summary += ' · 큰 별 ' + elements.largeStarStrength.value + '%';
+    if (elements.upsample.checked) summary += ' · 2×';
+    elements.detailsToggleText.textContent = isOpen ? '세부 설정 닫기' : '세부 설정 · ' + summary;
+    elements.largeStarControl.classList.toggle('disabled-control', !elements.importBoost.checked);
+    elements.largeStarStrength.disabled = running || stretchRunning || !elements.importBoost.checked;
+  }
+
+  function resetDetails() {
+    elements.importStarless.checked = true;
+    elements.importStars.checked = true;
+    elements.importBoost.checked = true;
+    elements.upsample.checked = false;
+    elements.largeStarStrength.value = '60';
+    elements.largeStarStrengthValue.textContent = '60%';
+    updateDetailsUI();
+    updateRunButton();
   }
 
   function setStretchDetailsOpen(open) {
     elements.stretchDetailsPanel.classList.toggle('hidden', !open);
     elements.stretchDetailsToggle.classList.toggle('active', open);
     elements.stretchDetailsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    elements.stretchDetailsToggleText.textContent = open ? '세부 설정 닫기' : '세부 설정 보기';
     elements.stretchDetailsChevron.textContent = open ? '▴' : '▾';
+    updateStretchDetailsUI();
+  }
+
+  function updateStretchDetailsUI() {
+    var isOpen = !elements.stretchDetailsPanel.classList.contains('hidden');
+    var summary = Math.round(stretchSettings.background) + '% · ' +
+      Number(stretchSettings.sigma).toFixed(1) + 'σ · Sat ' + Number(stretchSettings.saturation).toFixed(1);
+    elements.stretchDetailsToggleText.textContent = isOpen ? '세부 설정 닫기' : '세부 설정 · ' + summary;
   }
 
   function updateRunButton() {
-    var target = document.querySelector('input[name="processingTarget"]:checked');
-    var layerReady = !target || target.value !== 'layer' || activeLayerInfo.supported;
-    var skyReady = !target || target.value !== 'sky' || activeLayerInfo.hasSelection || activeLayerInfo.hasMask;
-    elements.runButton.disabled = running || stretchRunning || !documentAvailable || !layerReady || !skyReady ||
+    elements.runButton.disabled = running || stretchRunning || !documentAvailable || !activeLayerInfo.supported ||
       !executableAvailable || !selectedResults(null).length;
   }
 
@@ -194,61 +241,96 @@
   }
 
   function updateTargetStatus() {
-    var target = document.querySelector('input[name="processingTarget"]:checked');
-    var layerMode = target && target.value === 'layer';
-    var skyMode = target && target.value === 'sky';
-    var statusClass = 'preflight-status scope-hint';
+    elements.starTargetValue.textContent = '현재 선택한 픽셀 레이어';
+    elements.starTargetBadge.className = 'stretch-context-badge';
+    elements.starMaskBadge.className = 'stretch-context-badge';
+    elements.targetStatus.className = 'stretch-context-hint';
+    elements.starMaskHint.className = 'stretch-context-hint';
     if (!documentAvailable) {
-      setStatus(elements.targetStatus, statusClass, 'Photoshop 문서를 먼저 여세요.', 'error');
-    } else if (skyMode && activeLayerInfo.hasSelection) {
-      setStatus(elements.targetStatus, statusClass, '준비됨 · 선택 영역으로 결과 적용 범위를 제한합니다.', '');
-    } else if (skyMode && activeLayerInfo.hasMask) {
-      setStatus(elements.targetStatus, statusClass, '준비됨 · 현재 레이어 마스크로 결과 적용 범위를 제한합니다.', '');
-    } else if (skyMode) {
-      setStatus(elements.targetStatus, statusClass, '사용 불가 · 선택 영역 또는 현재 레이어 마스크가 필요합니다.', 'error');
-    } else if (!layerMode) {
-      setStatus(elements.targetStatus, statusClass, '준비됨 · 현재 보이는 모든 레이어를 합성합니다.', '');
+      elements.starTargetBadge.textContent = '사용 불가';
+      elements.starTargetBadge.classList.add('error');
+      elements.targetStatus.textContent = 'Photoshop 문서를 먼저 여세요.';
+      elements.targetStatus.classList.add('error');
     } else if (!activeLayerInfo.supported) {
-      setStatus(elements.targetStatus, statusClass, '사용 불가 · 일반 픽셀 레이어를 선택하세요.', 'error');
+      elements.starTargetBadge.textContent = '사용 불가';
+      elements.starTargetBadge.classList.add('error');
+      elements.targetStatus.textContent = '일반 픽셀 레이어를 선택하세요.';
+      elements.targetStatus.classList.add('error');
     } else if (activeLayerInfo.coverage === 'PARTIAL') {
-      setStatus(elements.targetStatus, statusClass, '사용 가능 · 빈 영역은 검정으로 채워집니다.', 'warning');
+      elements.starTargetBadge.textContent = '사용 가능';
+      elements.targetStatus.textContent = '레이어의 픽셀을 처리하며 빈 영역은 검정으로 채웁니다.';
+      elements.targetStatus.classList.add('warning');
     } else {
-      setStatus(elements.targetStatus, statusClass, '준비됨 · 전체 프레임 픽셀 레이어입니다.', '');
+      elements.starTargetBadge.textContent = '사용 가능';
+      elements.targetStatus.textContent = '현재 레이어의 픽셀을 처리합니다.';
+    }
+    if (activeLayerInfo.hasSelection) {
+      elements.starMaskValue.textContent = '선택 영역 사용';
+      elements.starMaskBadge.textContent = '자동';
+      elements.starMaskHint.textContent = '선택 영역을 모든 결과 레이어의 마스크로 적용합니다.';
+    } else if (activeLayerInfo.hasMask) {
+      elements.starMaskValue.textContent = '현재 레이어 마스크 복사';
+      elements.starMaskBadge.textContent = '자동';
+      elements.starMaskHint.textContent = '현재 레이어 마스크를 모든 결과 레이어에 복사합니다.';
+    } else {
+      elements.starMaskValue.textContent = '적용 안 함';
+      elements.starMaskBadge.textContent = '마스크 없음';
+      elements.starMaskBadge.classList.add('neutral');
+      elements.starMaskHint.textContent = '마스크 없이 결과 레이어를 생성합니다.';
     }
   }
 
   function updateStretchStatus() {
-    var statusClass = 'preflight-status scope-hint';
     var ready = documentAvailable && activeLayerInfo.supported;
+    elements.stretchTargetValue.textContent = '현재 선택한 픽셀 레이어';
+    elements.stretchTargetBadge.className = 'stretch-context-badge';
+    elements.stretchMaskBadge.className = 'stretch-context-badge';
+    elements.stretchTargetHint.className = 'stretch-context-hint';
+    elements.stretchMaskHint.className = 'stretch-context-hint';
     if (!documentAvailable) {
-      setStatus(elements.stretchScopeHint, statusClass, 'Photoshop 문서를 먼저 여세요.', 'error');
+      elements.stretchTargetBadge.textContent = '사용 불가';
+      elements.stretchTargetBadge.classList.add('error');
+      elements.stretchTargetHint.textContent = 'Photoshop 문서를 먼저 여세요.';
+      elements.stretchTargetHint.classList.add('error');
     } else if (!activeLayerInfo.supported) {
-      setStatus(elements.stretchScopeHint, statusClass, '사용 불가 · 일반 픽셀 레이어를 선택하세요.', 'error');
-    } else if (stretchSettings.skyOnly && activeLayerInfo.hasSelection) {
-      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 선택 영역으로 결과 범위를 제한합니다.', '');
-    } else if (stretchSettings.skyOnly && activeLayerInfo.hasMask) {
-      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 현재 레이어 마스크로 결과 범위를 제한합니다.', '');
-    } else if (stretchSettings.skyOnly) {
-      ready = false;
-      setStatus(elements.stretchScopeHint, statusClass, '사용 불가 · 선택 영역 또는 현재 레이어 마스크가 필요합니다.', 'error');
+      elements.stretchTargetBadge.textContent = '사용 불가';
+      elements.stretchTargetBadge.classList.add('error');
+      elements.stretchTargetHint.textContent = '일반 픽셀 레이어를 선택하세요.';
+      elements.stretchTargetHint.classList.add('error');
     } else if (activeLayerInfo.coverage === 'PARTIAL') {
-      setStatus(elements.stretchScopeHint, statusClass, '사용 가능 · 빈 영역은 검정으로 채워집니다.', 'warning');
+      elements.stretchTargetBadge.textContent = '사용 가능';
+      elements.stretchTargetHint.textContent = '레이어의 픽셀을 Stretch하며 빈 영역은 검정으로 채웁니다.';
+      elements.stretchTargetHint.classList.add('warning');
     } else {
-      setStatus(elements.stretchScopeHint, statusClass, '준비됨 · 전체 프레임 픽셀 레이어입니다.', '');
+      elements.stretchTargetBadge.textContent = '사용 가능';
+      elements.stretchTargetHint.textContent = '레이어의 픽셀을 Stretch합니다.';
+    }
+    if (activeLayerInfo.hasSelection) {
+      elements.stretchMaskValue.textContent = '선택 영역 사용';
+      elements.stretchMaskBadge.textContent = '자동';
+      elements.stretchMaskHint.textContent = '선택 영역을 Stretched 레이어의 마스크로 적용합니다.';
+    } else if (activeLayerInfo.hasMask) {
+      elements.stretchMaskValue.textContent = '현재 레이어 마스크 복사';
+      elements.stretchMaskBadge.textContent = '자동';
+      elements.stretchMaskHint.textContent = '현재 레이어 마스크를 Stretched 레이어에 복사합니다.';
+    } else {
+      elements.stretchMaskValue.textContent = '적용 안 함';
+      elements.stretchMaskBadge.textContent = '마스크 없음';
+      elements.stretchMaskBadge.classList.add('neutral');
+      elements.stretchMaskHint.textContent = '마스크 없이 Stretched 레이어를 생성합니다.';
     }
     var busy = running || stretchRunning;
     elements.createStretchLayer.disabled = busy || !ready;
     elements.openStretchEditor.disabled = busy || !documentAvailable || !activeLayerInfo.supported;
     elements.stretchDetailsToggle.disabled = busy;
-    var controls = document.querySelectorAll('input[name=stretchScope]');
-    for (var index=0; index<controls.length; index++) controls[index].disabled = busy;
   }
 
   function setConfigurationDisabled(disabled) {
     var controls = document.querySelectorAll(
-      'input[name="processingTarget"], #importStarless, #importStars, #importBoost, #upsample, #largeStarStrength, #exePath, #browsePath, #savePath, #helpButton, #closeHelp, #settingsButton, #closeSettings, #detailsToggle, #starNetTab, #stretchTab'
+      '#importStarless, #importStars, #importBoost, #upsample, #largeStarStrength, #resetDetails, #exePath, #browsePath, #savePath, #helpButton, #closeHelp, #settingsButton, #closeSettings, #detailsToggle, #starNetTab, #stretchTab'
     );
     for (var index = 0; index < controls.length; index++) controls[index].disabled = disabled;
+    updateDetailsUI();
   }
 
   function scriptCall(name, args, callback) {
@@ -285,6 +367,7 @@
       updateTargetStatus();
       updateStretchStatus();
       updateRunButton();
+      writeStretchState();
     });
   }
 
@@ -462,7 +545,7 @@
   function finalizeSkyMask(documentId, skyMaskToken, callback) {
     if (!skyMaskToken) { callback(null); return; }
     scriptCall('ST_finalizeSkyMask', [documentId, skyMaskToken], function (result) {
-      if (result !== 'OK') callback(new Error(result || '지정 영역 임시 데이터 정리에 실패했습니다.'));
+      if (result !== 'OK') callback(new Error(result || '결과 마스크 임시 데이터 정리에 실패했습니다.'));
       else callback(null);
     });
   }
@@ -510,13 +593,8 @@
       showMessage('Photoshop 문서를 먼저 여세요.', 'error');
       return;
     }
-    var requestedTarget = document.querySelector('input[name="processingTarget"]:checked');
-    if (requestedTarget && requestedTarget.value === 'layer' && !activeLayerInfo.supported) {
-      showMessage('현재 레이어만 처리하려면 일반 픽셀 레이어를 선택하세요.', 'error');
-      return;
-    }
-    if (requestedTarget && requestedTarget.value === 'sky' && !activeLayerInfo.hasSelection && !activeLayerInfo.hasMask) {
-      showMessage('지정 영역을 사용하려면 선택 영역을 만들거나 현재 레이어에 마스크를 추가하세요.', 'error');
+    if (!activeLayerInfo.supported) {
+      showMessage('일반 픽셀 레이어를 선택하세요.', 'error');
       return;
     }
     if (!executableAvailable) {
@@ -550,10 +628,7 @@
       return;
     }
     currentFiles = files;
-    var targetControl = document.querySelector('input[name="processingTarget"]:checked');
-    var processingTarget = targetControl ? targetControl.value : 'layer';
-
-    scriptCall('ST_prepareInput', [files.input, processingTarget], function (prepared) {
+    scriptCall('ST_prepareInput', [files.input, 'layer-auto'], function (prepared) {
       var parts = (prepared || '').split('|');
       var preparedDocumentId = parts[0] === 'OK' ? parts[1] : '';
       var skyMaskToken = '';
@@ -565,7 +640,7 @@
       if (cancelRequested) {
         removeFiles(files);
         finalizeSkyMask(preparedDocumentId, skyMaskToken, function (cleanupError) {
-          finish(cleanupError ? '작업을 취소했지만 지정 영역 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
+          finish(cleanupError ? '작업을 취소했지만 결과 마스크 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
         });
         return;
       }
@@ -593,7 +668,7 @@
         removeFiles(files);
         finalizeSkyMask(parts[1], skyMaskToken, function (cleanupError) {
           finish('StarNet2 실행 실패: ' + spawnError.message +
-            (cleanupError ? '\n지정 영역 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
+            (cleanupError ? '\n결과 마스크 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
         });
         return;
       }
@@ -641,7 +716,7 @@
         if (cancelRequested) {
           removeFiles(files);
           finalizeSkyMask(parts[1], skyMaskToken, function (cleanupError) {
-            finish(cleanupError ? '작업을 취소했지만 지정 영역 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
+            finish(cleanupError ? '작업을 취소했지만 결과 마스크 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
           });
           return;
         }
@@ -652,7 +727,7 @@
             : '';
           finalizeSkyMask(parts[1], skyMaskToken, function (cleanupError) {
             finish('StarNet2가 오류 코드 ' + code + '으로 종료되었습니다.' + backendHint + '\n' + log.slice(-1000) +
-              (cleanupError ? '\n지정 영역 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
+              (cleanupError ? '\n결과 마스크 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
           });
           return;
         }
@@ -661,7 +736,7 @@
           removeFiles(files);
           finalizeSkyMask(parts[1], skyMaskToken, function (cleanupError) {
             finish('StarNet2가 결과 파일을 생성하지 않았습니다: ' + missing.map(function (item) { return item[1]; }).join(', ') +
-              (cleanupError ? '\n지정 영역 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
+              (cleanupError ? '\n결과 마스크 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
           });
           return;
         }
@@ -670,13 +745,13 @@
           removeFiles(files);
           finalizeSkyMask(parts[1], skyMaskToken, function (cleanupError) {
             if (cancelRequested || (error && error.message === 'CANCELLED')) {
-              finish(cleanupError ? '작업을 취소했지만 지정 영역 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
+              finish(cleanupError ? '작업을 취소했지만 결과 마스크 임시 데이터 정리에 실패했습니다: ' + cleanupError.message : '작업을 취소했습니다.', cleanupError ? 'error' : '');
             } else if (error) {
-              finish('결과 레이어 생성 실패: ' + error.message + (cleanupError ? '\n지정 영역 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
+              finish('결과 레이어 생성 실패: ' + error.message + (cleanupError ? '\n결과 마스크 임시 데이터 정리 실패: ' + cleanupError.message : ''), 'error');
             } else if (cleanupError) {
-              finish('결과 레이어는 추가했지만 지정 영역 임시 데이터 정리에 실패했습니다: ' + cleanupError.message, 'error');
+              finish('결과 레이어는 추가했지만 결과 마스크 임시 데이터 정리에 실패했습니다: ' + cleanupError.message, 'error');
             } else {
-              finish(importedNames.join(', ') + ' 레이어를 추가했습니다.' + (skyMaskToken ? '\n지정 영역 마스크를 적용했습니다.' : '') + inputWarning, 'ok');
+              finish(importedNames.join(', ') + ' 레이어를 추가했습니다.' + (skyMaskToken ? '\n결과 마스크를 적용했습니다.' : '') + inputWarning, 'ok');
             }
           });
         });
@@ -700,10 +775,11 @@
   }
 
   function updateStretchSummary() {
-    elements.stretchSummary.textContent = stretchSettings.preset + ' · Strength ' +
-      Math.round(stretchSettings.strength) + '% · Saturation ' + Number(stretchSettings.saturation).toFixed(1);
-    var controls = document.querySelectorAll('input[name="stretchScope"]');
-    for (var index=0; index<controls.length; index++) controls[index].checked = controls[index].value === (stretchSettings.skyOnly ? 'sky' : 'layer');
+    elements.stretchPresetBadge.textContent = stretchSettings.preset || '사용자 설정';
+    elements.stretchBackgroundValue.textContent = Math.round(stretchSettings.background) + '%';
+    elements.stretchBlackPointValue.textContent = Number(stretchSettings.sigma).toFixed(1) + 'σ';
+    elements.stretchSaturationValue.textContent = Number(stretchSettings.saturation).toFixed(1);
+    updateStretchDetailsUI();
   }
 
   function writeStretchState() {
@@ -712,9 +788,10 @@
       sessionId:stretchSessionId,
       source:'현재 레이어 · ' + stretchPreviewInfo.width + ' × ' + stretchPreviewInfo.height,
       previewFile:stretchPreviewFile, preset:stretchSettings.preset,
-      strength:stretchSettings.strength, saturation:stretchSettings.saturation,
-      skyOnly:stretchSettings.skyOnly, documentId:stretchPreviewInfo.documentId,
-      layerId:stretchPreviewInfo.layerId, updatedAt:Date.now()
+      background:stretchSettings.background, sigma:stretchSettings.sigma, saturation:stretchSettings.saturation,
+      maskMode:activeLayerInfo.hasSelection?'selection':(activeLayerInfo.hasMask?'layer-mask':'none'), documentId:stretchPreviewInfo.documentId,
+      layerId:stretchPreviewInfo.layerId, runId:stretchEditorRun.id, runStatus:stretchEditorRun.status,
+      runMessage:stretchEditorRun.message, updatedAt:Date.now()
     };
     try { fs.writeFileSync(stretchExchangeFile('stretch_editor_state.json'), JSON.stringify(state), 'utf8'); } catch (_) {}
   }
@@ -738,6 +815,7 @@
         return;
       }
       stretchPreviewInfo = { documentId:Number(parts[1]), layerId:Number(parts[2]), width:Number(parts[3]), height:Number(parts[4]) };
+      stretchEditorRun = { id:'', status:'idle', message:'' };
       writeStretchState();
       elements.stretchMessage.textContent = '';
       try {
@@ -764,6 +842,11 @@
     elements.stretchProgress.classList.add('hidden');
     elements.stretchMessage.textContent = message || '';
     elements.stretchMessage.className = 'message' + (type ? ' ' + type : '');
+    if (stretchEditorRun.status === 'processing') {
+      stretchEditorRun.status = type === 'ok' ? 'completed' : (type === 'error' ? 'error' : 'cancelled');
+      stretchEditorRun.message = message || '';
+      writeStretchState();
+    }
     updateRunButton();
     updateStretchStatus();
     detectDocument();
@@ -776,8 +859,12 @@
     elements.stretchStatus.textContent = 'Stretch 취소 중…';
   }
 
-  function runStretch(expectedTarget) {
+  function runStretch(expectedTarget, editorRunId) {
     if (stretchRunning || running) return;
+    if (editorRunId) {
+      stretchEditorRun = { id:String(editorRunId), status:'processing', message:'Stretch 처리 중…' };
+      writeStretchState();
+    }
     if (!fs || !window.StarNetStretchProcessor ||
         typeof window.StarNetStretchProcessor.stretchTiffAsync !== 'function' ||
         !documentAvailable || !activeLayerInfo.supported) {
@@ -785,9 +872,9 @@
     }
     var settings = {
       preset:stretchSettings.preset,
-      strength:window.StarNetStretchProcessor.normalizeStrength(stretchSettings.strength),
-      saturation:window.StarNetStretchProcessor.normalizeSaturation(stretchSettings.saturation),
-      skyOnly:!!stretchSettings.skyOnly
+      background:window.StarNetStretchProcessor.normalizeBackground(stretchSettings.background),
+      sigma:window.StarNetStretchProcessor.normalizeSigma(stretchSettings.sigma),
+      saturation:window.StarNetStretchProcessor.normalizeSaturation(stretchSettings.saturation)
     };
     var target = expectedTarget && expectedTarget.documentId && expectedTarget.layerId ? expectedTarget : {
       documentId:activeLayerInfo.documentId,
@@ -795,9 +882,6 @@
     };
     if (!target.documentId || !target.layerId) {
       finishStretch('처리할 문서와 레이어를 다시 선택하세요.', 'error'); return;
-    }
-    if (settings.skyOnly && !activeLayerInfo.hasSelection && !activeLayerInfo.hasMask) {
-      finishStretch('지정 영역에는 Photoshop 선택 영역 또는 현재 레이어 마스크가 필요합니다.', 'error'); return;
     }
     stretchRunning = true;
     stretchCancelRequested = false;
@@ -810,7 +894,7 @@
     elements.stretchStatus.textContent='16-bit TIFF 준비 중…'; elements.stretchMessage.textContent='';
     var token='starnet2_stretch_'+Date.now(), folder=tempFolder();
     var input=path.join(folder,token+'_input.tif'), output=path.join(folder,token+'_output.tif');
-    scriptCall('ST_prepareInput',[input,settings.skyOnly?'layer-sky':'layer',target.documentId,target.layerId],function(prepared){
+    scriptCall('ST_prepareInput',[input,'layer-auto',target.documentId,target.layerId],function(prepared){
       var parts=(prepared||'').split('|'), maskToken='';
       try { maskToken=decodeURIComponent(parts[6]||''); } catch(_) {}
       if(parts[0]!=='OK'){removeFiles({input:input,output:output});finishStretch(parts.slice(1).join('|')||'입력 TIFF 생성 실패','error');return;}
@@ -821,7 +905,7 @@
         return;
       }
       elements.stretchProgressBar.style.width='45%';elements.stretchStatus.textContent='Stretch 계산 중…';
-      window.StarNetStretchProcessor.stretchTiffAsync(fs,input,output,settings.preset,settings.saturation,settings.strength,{
+      window.StarNetStretchProcessor.stretchTiffAsync(fs,input,output,settings.background,settings.sigma,settings.saturation,{
         isCancelled:function(){return stretchCancelRequested;},
         onProgress:function(percent){
           elements.stretchProgressBar.style.width=(45+percent*0.4)+'%';
@@ -835,7 +919,7 @@
         }
         elements.stretchProgressBar.style.width='85%';elements.stretchStatus.textContent='결과 레이어 생성 중…';
         elements.cancelStretch.disabled=true;
-        var name='Stretched ('+settings.preset+', Strength '+Math.round(settings.strength)+'%, Saturation '+Number(settings.saturation).toFixed(1)+')';
+        var name='Stretched ('+Math.round(settings.background)+'% Bg, '+Number(settings.sigma).toFixed(1)+' sigma, Saturation '+Number(settings.saturation).toFixed(1)+')';
         scriptCall('ST_importResult',[output,parts[1],name,parts[2]||'',parts[4]||'NONE',profileName,maskToken,100],function(imported){
           removeFiles({input:input,output:output});finalizeSkyMask(parts[1],maskToken,function(cleanupError){
             var ok=(imported||'').indexOf('OK|')===0;
@@ -852,10 +936,10 @@
     try { file=stretchExchangeFile('stretch_editor_command.json'); if(!fs.existsSync(file))return; var command=JSON.parse(fs.readFileSync(file,'utf8')); fs.unlinkSync(file);
       if(command.sessionId!==stretchSessionId)return;
       if(command.id&&command.id===lastStretchCommandId)return; lastStretchCommandId=command.id||'';
-      if(command.action==='settings'&&command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.strength=window.StarNetStretchProcessor.normalizeStrength(command.value.strength);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);stretchSettings.skyOnly=!!command.value.skyOnly;updateStretchSummary();updateStretchStatus();writeStretchState();}
+      if(command.action==='settings'&&command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.background=window.StarNetStretchProcessor.normalizeBackground(command.value.background);stretchSettings.sigma=window.StarNetStretchProcessor.normalizeSigma(command.value.sigma);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);updateStretchSummary();updateStretchStatus();writeStretchState();}
       else if(command.action==='create'){
-        if(command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.strength=window.StarNetStretchProcessor.normalizeStrength(command.value.strength);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);stretchSettings.skyOnly=!!command.value.skyOnly;updateStretchSummary();updateStretchStatus();writeStretchState();}
-        runStretch({documentId:Number(command.value&&command.value.documentId)||0,layerId:Number(command.value&&command.value.layerId)||0});
+        if(command.value){stretchSettings.preset=command.value.preset||stretchSettings.preset;stretchSettings.background=window.StarNetStretchProcessor.normalizeBackground(command.value.background);stretchSettings.sigma=window.StarNetStretchProcessor.normalizeSigma(command.value.sigma);stretchSettings.saturation=window.StarNetStretchProcessor.normalizeSaturation(command.value.saturation);updateStretchSummary();updateStretchStatus();writeStretchState();}
+        runStretch({documentId:Number(command.value&&command.value.documentId)||0,layerId:Number(command.value&&command.value.layerId)||0},command.id||('editor_'+Date.now()));
       }
     } catch(_) {}
   }
@@ -881,7 +965,10 @@
   });
   elements.largeStarStrength.addEventListener('input', function () {
     elements.largeStarStrengthValue.textContent = elements.largeStarStrength.value + '%';
+    updateDetailsUI();
   });
+  elements.upsample.addEventListener('change', updateDetailsUI);
+  elements.resetDetails.addEventListener('click', resetDetails);
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' || event.keyCode === 27) {
       if (!elements.helpCard.classList.contains('hidden')) setHelpOpen(false);
@@ -896,24 +983,12 @@
     if (selectedPath && selectedPath.indexOf('fakepath') === -1) useExecutablePath(selectedPath);
     else if (selectedPath) showMessage('선택한 파일의 전체 경로를 가져올 수 없습니다.', 'error');
   });
-  var targetControls = document.querySelectorAll('input[name="processingTarget"]');
-  for (var targetIndex = 0; targetIndex < targetControls.length; targetIndex++) {
-    (function (targetControl) {
-      var targetLabel = targetControl.parentNode;
-      targetControl.addEventListener('change', function () { updateTargetStatus(); updateRunButton(); });
-      targetControl.addEventListener('focus', function () {
-        setStatus(elements.targetStatus, 'preflight-status scope-hint', targetLabel.getAttribute('data-description') || '', '');
-      });
-      targetControl.addEventListener('blur', updateTargetStatus);
-      targetLabel.addEventListener('mouseenter', function () {
-        setStatus(elements.targetStatus, 'preflight-status scope-hint', targetLabel.getAttribute('data-description') || '', '');
-      });
-      targetLabel.addEventListener('mouseleave', updateTargetStatus);
-    }(targetControls[targetIndex]));
-  }
   var resultControls = document.querySelectorAll('#importStarless, #importStars, #importBoost');
   for (var resultIndex = 0; resultIndex < resultControls.length; resultIndex++) {
-    resultControls[resultIndex].addEventListener('change', updateRunButton);
+    resultControls[resultIndex].addEventListener('change', function () {
+      updateDetailsUI();
+      updateRunButton();
+    });
   }
   elements.runButton.addEventListener('click', runProcess);
   elements.cancelButton.addEventListener('click', cancelProcess);
@@ -922,11 +997,8 @@
   elements.openStretchEditor.addEventListener('click', openStretchEditor);
   elements.createStretchLayer.addEventListener('click', function(){runStretch();});
   elements.cancelStretch.addEventListener('click', cancelStretch);
-  var stretchScopeControls=document.querySelectorAll('input[name="stretchScope"]');
-  for(var stretchScopeIndex=0;stretchScopeIndex<stretchScopeControls.length;stretchScopeIndex++){
-    stretchScopeControls[stretchScopeIndex].addEventListener('change',function(){stretchSettings.skyOnly=this.value==='sky';updateStretchSummary();updateStretchStatus();writeStretchState();});
-  }
   try { elements.exePath.value = localStorage.getItem('starnet2.exePath') || 'starnet2.exe'; } catch (error) {}
+  updateDetailsUI();
   cleanupStaleTempFiles();
   try { var staleStretchCommand=stretchExchangeFile('stretch_editor_command.json'); if(fs.existsSync(staleStretchCommand))fs.unlinkSync(staleStretchCommand); } catch (_) {}
   updateStretchSummary();
