@@ -24,6 +24,7 @@
   var activeRunSkyMaskToken = '';
   var activeRunLayerIds = [];
   var maxProcessLogLength = 65536;
+  var stretchUiEnabled = false;
   var activeFeature = 'starnet';
   var stretchRunning = false;
   var stretchPreviewFile = '';
@@ -760,7 +761,8 @@
   }
 
   function setFeature(feature) {
-    activeFeature = feature === 'stretch' ? 'stretch' : 'starnet';
+    var wantsStretch = feature === 'stretch';
+    activeFeature = wantsStretch && stretchUiEnabled ? 'stretch' : 'starnet';
     elements.starNetPanel.classList.toggle('hidden', activeFeature !== 'starnet');
     elements.stretchPanel.classList.toggle('hidden', activeFeature !== 'stretch');
     elements.starNetTab.classList.toggle('active', activeFeature === 'starnet');
@@ -797,6 +799,7 @@
   }
 
   function openStretchEditor() {
+    if (!stretchUiEnabled) return;
     if (!fs || !path || !documentAvailable || !activeLayerInfo.supported) {
       elements.stretchMessage.textContent = '일반 픽셀 레이어를 선택하세요.';
       elements.stretchMessage.className = 'message error';
@@ -860,6 +863,7 @@
   }
 
   function runStretch(expectedTarget, editorRunId) {
+    if (!stretchUiEnabled) return;
     if (stretchRunning || running) return;
     if (editorRunId) {
       stretchEditorRun = { id:String(editorRunId), status:'processing', message:'Stretch 처리 중…' };
@@ -1003,7 +1007,7 @@
   try { var staleStretchCommand=stretchExchangeFile('stretch_editor_command.json'); if(fs.existsSync(staleStretchCommand))fs.unlinkSync(staleStretchCommand); } catch (_) {}
   updateStretchSummary();
   updateStretchStatus();
-  window.setInterval(pollStretchCommand,250);
+  if (stretchUiEnabled) window.setInterval(pollStretchCommand,250);
   detectDocument();
   validateExecutable();
   window.setInterval(detectDocument, 1500);

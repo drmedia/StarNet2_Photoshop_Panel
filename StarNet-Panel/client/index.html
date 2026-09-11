@@ -63,19 +63,14 @@
           <p><strong>큰 별 강조 강도</strong>는 Star Boost (Large)의 불투명도를 조절합니다.</p>
           <p><strong>2× Upsample</strong>은 작은 별 처리를 개선할 수 있지만 처리 시간이 늘어납니다.</p>
         </div>
-        <div class="help-section">
-          <div class="help-title">Stretch</div>
-          <p>어두운 선형 상태의 일반 픽셀 레이어를 화면 표시용으로 밝게 펼칩니다.</p>
-          <p>Editor 미리보기와 실제 16-bit 결과는 약간 다를 수 있으며, 처리 중에는 취소할 수 있습니다.</p>
-        </div>
         <div class="help-note">StarNet2 실행 파일을 찾지 못하면 설정 버튼에서 경로를 지정하세요.</div>
       </div>
     </div>
 
     <div id="mainContent">
-    <div class="feature-tabs">
+    <div class="feature-tabs stretch-hidden">
       <button id="starNetTab" class="feature-tab active" type="button">Star Removal</button>
-      <button id="stretchTab" class="feature-tab" type="button">Stretch</button>
+      <button id="stretchTab" class="feature-tab hidden" type="button">Stretch</button>
     </div>
     <div id="starNetPanel">
     <div class="card scope-card">
@@ -179,7 +174,7 @@
       <div id="stretchMessage" class="message"></div>
     </div>
 
-    <div class="footer">StarNet2 CLI 2.5.x–2.6.x<span id="panelVersion" class="panel-version">v0.9.4</span></div>
+    <div class="footer">StarNet2 CLI 2.5.x–2.6.x<span id="panelVersion" class="panel-version">v0.9.5</span></div>
     </div>
   </div>
   <script src="stretch-processor.js"></script>

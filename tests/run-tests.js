@@ -18,6 +18,7 @@ function checkStructure() {
   var main = read(path.join(client, 'main.js'));
   var host = read(path.join(panel, 'host', 'host.jsx'));
   var installer = read(path.join(root, 'Install_Windows.bat'));
+  var readme = read(path.join(root, 'README.md'));
 
   assert(manifest.indexOf('Id="com.drmedia.starnet.stretcheditor"') >= 0);
   assert(/<Type>Modeless<\/Type>/.test(manifest));
@@ -30,11 +31,20 @@ function checkStructure() {
     'largeStarControl', 'largeStarStrength', 'resetDetails', 'openStretchEditor', 'createStretchLayer', 'cancelStretch'].forEach(function (id) {
     assert(html.indexOf('id="' + id + '"') >= 0, id + '가 없습니다.');
   });
+  assert(html.indexOf('class="feature-tabs stretch-hidden"') >= 0, 'Stretch 탭 행이 숨김 모드가 아닙니다.');
+  assert(html.indexOf('id="stretchTab" class="feature-tab hidden"') >= 0, 'Stretch 탭이 표시 상태입니다.');
+  assert(html.indexOf('<div class="help-title">Stretch</div>') < 0, '도움말에 숨긴 Stretch 안내가 남아 있습니다.');
+  assert(read(path.join(client, 'style.css')).indexOf('.feature-tabs.stretch-hidden') >= 0, '단일 탭 레이아웃이 없습니다.');
   ['preset', 'background', 'sigma', 'saturation', 'maskStatus', 'createLayer', 'preview',
     'viewOriginal', 'viewStretched', 'viewSplit', 'zoomFit', 'zoomActual', 'zoomOut', 'zoomValue', 'zoomIn'].forEach(function (id) {
     assert(editor.indexOf('id="' + id + '"') >= 0, 'Editor ' + id + '가 없습니다.');
   });
   assert(main.indexOf("requestOpenExtension('com.drmedia.starnet.stretcheditor'") >= 0);
+  assert(main.indexOf('var stretchUiEnabled = false;') >= 0, 'Stretch 비활성 플래그가 없습니다.');
+  assert(main.indexOf("activeFeature = wantsStretch && stretchUiEnabled ? 'stretch' : 'starnet';") >= 0, 'Stretch 탭 우회 방지가 없습니다.');
+  assert(main.indexOf('if (stretchUiEnabled) window.setInterval(pollStretchCommand,250);') >= 0, '숨긴 Stretch 명령 폴링이 차단되지 않았습니다.');
+  assert(readme.indexOf('## Stretch 사용법') < 0, 'README에 숨긴 Stretch 사용법이 남아 있습니다.');
+  assert(readme.indexOf('docs/images/stretch-') < 0, 'README에 숨긴 Stretch 화면이 남아 있습니다.');
   assert(main.indexOf("'layer-auto'") >= 0);
   assert(html.indexOf('name="processingTarget"') < 0);
   assert(main.indexOf('input[name="processingTarget"]') < 0);

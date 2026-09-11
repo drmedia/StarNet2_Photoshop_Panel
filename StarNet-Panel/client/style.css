@@ -107,6 +107,7 @@ input[type="range"] { width: 100%; margin: 10px 0 2px; accent-color: #1473e6; }
 .footer { color: #777; font-size: 10px; line-height: 1.4; margin-top: 10px; text-align: center; }
 .panel-version { color: #999; margin-left: 8px; font-variant-numeric: tabular-nums; }
 .feature-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 10px; }
+.feature-tabs.stretch-hidden { grid-template-columns: 1fr; }
 .feature-tab { padding: 9px; border: 1px solid #4c4c4c; border-radius: 7px; background: #282828; color: #aaa; cursor: pointer; }
 .feature-tab.active { background: #505050; border-color: #707070; color: #fff; font-weight: 600; }
 .stretch-settings-card { padding-top: 11px; }
